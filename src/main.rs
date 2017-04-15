@@ -23,6 +23,11 @@ use hwnd_rt::HwndRtParams;
 use util::{Error, ToWide};
 use window::{create_window, WndProc};
 
+extern "system" {
+    // defined in shcore library
+    pub fn SetProcessDpiAwareness(value: PROCESS_DPI_AWARENESS) -> HRESULT;
+}
+
 struct MainWinState {
     d2d_factory: direct2d::Factory,
     render_target: Option<RenderTarget>,
@@ -135,9 +140,11 @@ fn create_main() -> Result<HWND, Error> {
             return Err(Error::Null);
         }
         let main_win: Rc<Box<WndProc>> = Rc::new(Box::new(MainWin::new(MainWinState::new())));
+        let width = 500;  // TODO: scale by dpi
+        let height = 400;
         let hwnd = create_window(winapi::WS_EX_OVERLAPPEDWINDOW, class_name.as_ptr(),
             class_name.as_ptr(), WS_OVERLAPPEDWINDOW | winapi::WS_VSCROLL,
-            CW_USEDEFAULT, CW_USEDEFAULT, 500, 400, 0 as HWND, 0 as HMENU, 0 as HINSTANCE,
+            CW_USEDEFAULT, CW_USEDEFAULT, width, height, 0 as HWND, 0 as HMENU, 0 as HINSTANCE,
             main_win);
         if hwnd.is_null() {
             return Err(Error::Null);
@@ -147,8 +154,9 @@ fn create_main() -> Result<HWND, Error> {
 }
 
 fn main() {
-    let hwnd = create_main().unwrap();
     unsafe {
+        SetProcessDpiAwareness(Process_System_DPI_Aware);  // TODO: per monitor (much harder)
+        let hwnd = create_main().unwrap();
         ShowWindow(hwnd, SW_SHOWNORMAL);
         UpdateWindow(hwnd);
         let mut msg = mem::uninitialized();

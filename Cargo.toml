@@ -18,3 +18,6 @@ direct2d = "0.0.5"
 #ole32-sys = { git = "https://github.com/retep998/winapi-rs", branch = "0.2" }
 
 gdi32-sys = "0.2"
+
+[build-dependencies]
+winapi-build = "0.1.1"
