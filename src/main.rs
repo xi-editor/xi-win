@@ -4,6 +4,7 @@ extern crate winapi;
 extern crate user32;
 extern crate gdi32;
 extern crate direct2d;
+extern crate directwrite;
 
 mod hwnd_rt;
 mod util;
@@ -18,6 +19,8 @@ use user32::*;
 use winapi::*;
 use direct2d::{RenderTarget, brush};
 use direct2d::math::*;
+use direct2d::render_target::DrawTextOption;
+use directwrite::text_format::{self, TextFormat};
 
 use hwnd_rt::HwndRtParams;
 use util::{Error, ToWide};
@@ -28,39 +31,64 @@ extern "system" {
     pub fn SetProcessDpiAwareness(value: PROCESS_DPI_AWARENESS) -> HRESULT;
 }
 
+struct Resources {
+    fg: brush::SolidColor,
+    bg: brush::SolidColor,
+    text_format: TextFormat,
+}
+
 struct MainWinState {
     d2d_factory: direct2d::Factory,
+    dwrite_factory: directwrite::Factory,
     render_target: Option<RenderTarget>,
-    blue: Option<brush::SolidColor>,
-    white: Option<brush::SolidColor>,
+    resources: Option<Resources>,
 }
 
 impl MainWinState {
     fn new() -> MainWinState {
         MainWinState {
             d2d_factory: direct2d::Factory::new().unwrap(),
+            dwrite_factory: directwrite::Factory::new().unwrap(),
             render_target: None,
-            blue: None,
-            white: None,
+            resources: None,
+        }
+    }
+
+    fn create_resources(&mut self) -> Resources {
+        let rt = self.render_target.as_mut().unwrap();
+        let text_format_params = text_format::ParamBuilder::new()
+            .size(15.0)
+            .family("Consolas")
+            .build().unwrap();
+        let text_format = self.dwrite_factory.create(text_format_params).unwrap();
+        Resources {
+            fg: rt.create_solid_color_brush(0xf0f0ea, &BrushProperties::default()).unwrap(),
+            bg: rt.create_solid_color_brush(0x272822, &BrushProperties::default()).unwrap(),
+            text_format: text_format,
         }
     }
 
     fn render(&mut self) {
         let res = {
+            if self.resources.is_none() {
+                self.resources = Some(self.create_resources());
+            }
+            let resources = &self.resources.as_ref().unwrap();
             let rt = self.render_target.as_mut().unwrap();
             rt.begin_draw();
-            if self.blue.is_none() {
-                self.blue = rt.create_solid_color_brush(0x101080, &BrushProperties::default()).ok();
-            }
-            if self.white.is_none() {
-                self.white = rt.create_solid_color_brush(0xffffff, &BrushProperties::default()).ok();
-            }
             let size = rt.get_size();
             let rect = RectF::from((0.0, 0.0, size.width, size.height));
-            rt.fill_rectangle(&rect, self.white.as_ref().unwrap());
-            rt.draw_line(&Point2F::from((10.0, 10.0)), &Point2F::from((90.0, 50.0)),
-                self.blue.as_ref().unwrap(), 1.0, None);
-
+            rt.fill_rectangle(&rect, &resources.bg);
+            rt.draw_line(&Point2F::from((10.0, 50.0)), &Point2F::from((90.0, 90.0)),
+                &resources.fg, 1.0, None);
+            let msg = "Hello DWrite";
+            rt.draw_text(
+                msg,
+                &resources.text_format,
+                &RectF::from((10.0, 10.0, 300.0, 90.0)),
+                &resources.fg,
+                &[DrawTextOption::EnableColorFont]
+            );
             rt.end_draw()
         };
         if res.is_err() {
@@ -103,8 +131,8 @@ impl WndProc for MainWin {
             WM_SIZE => unsafe {
                 let mut state = self.state.borrow_mut();
                 state.render_target.as_mut().and_then(|rt|
-                    rt.hwnd_rt().map(|hrt|
-                        (*hrt.raw_value()).Resize(&D2D1_SIZE_U {
+                    rt.hwnd_rt().map(|mut hrt|
+                        hrt.Resize(&D2D1_SIZE_U {
                             width: LOWORD(lparam as u32) as u32,
                             height: HIWORD(lparam as u32) as u32,
                         })
