@@ -19,5 +19,10 @@ direct2d = "0.0.5"
 
 gdi32-sys = "0.2"
 
+xi-core-lib = "0.2"
+xi-rpc = "0.2"
+serde = "0.9"
+serde_json = "0.9"
+
 [build-dependencies]
 winapi-build = "0.1.1"

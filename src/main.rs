@@ -1,4 +1,5 @@
 #![feature(rc_raw)] // will stabilize in 1.17
+#![windows_subsystem = "windows"]
 
 extern crate winapi;
 extern crate user32;
@@ -6,13 +7,19 @@ extern crate gdi32;
 extern crate direct2d;
 extern crate directwrite;
 
+extern crate xi_core_lib;
+extern crate xi_rpc;
+
 mod hwnd_rt;
 mod util;
 mod window;
+mod xi_thread;
 
 use std::cell::RefCell;
 use std::mem;
 use std::ptr::null_mut;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicPtr, Ordering};
 use std::rc::Rc;
 
 use user32::*;
@@ -25,6 +32,7 @@ use directwrite::text_format::{self, TextFormat};
 use hwnd_rt::HwndRtParams;
 use util::{Error, ToWide};
 use window::{create_window, WndProc};
+use xi_thread::{start_xi_thread, XI_FROM_CORE, XI_MAGIC, XiPeer};
 
 extern "system" {
     // defined in shcore library
@@ -98,12 +106,16 @@ impl MainWinState {
 }
 
 struct MainWin {
-    state: RefCell<MainWinState>
+    shared_hwnd: Arc<AtomicPtr<HWND__>>,
+    peer: XiPeer,
+    state: RefCell<MainWinState>,
 }
 
 impl MainWin {
-    fn new(state: MainWinState) -> MainWin {
+    fn new(shared_hwnd: Arc<AtomicPtr<HWND__>>, peer: XiPeer, state: MainWinState) -> MainWin {
         MainWin {
+            shared_hwnd: shared_hwnd,
+            peer: peer,
             state: RefCell::new(state)
         }
     }
@@ -113,6 +125,11 @@ impl WndProc for MainWin {
     fn window_proc(&self, hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM) -> Option<LRESULT> {
         //println!("{:x} {:x} {:x}", msg, wparam, lparam);
         match msg {
+            WM_DESTROY => unsafe {
+                self.shared_hwnd.store(null_mut(), Ordering::Release);
+                PostQuitMessage(0);
+                None
+            },
             WM_PAINT => unsafe {
                 let mut state = self.state.borrow_mut();
                 if state.render_target.is_none() {
@@ -140,12 +157,26 @@ impl WndProc for MainWin {
                 );
                 None
             },
+            WM_LBUTTONDOWN => {
+                self.peer.send(r#"{"method": "new_tab", "params": [], "id": "0"}"#.to_string());
+                Some(0)
+            },
+            XI_FROM_CORE => unsafe {
+                if wparam == XI_MAGIC {
+                    // An assumption that only valid utf-8 is sent. Should be valid.
+                    let buf = Box::from_raw(lparam as *mut String);
+                    print!("{}", &buf);
+                } else {
+                    println!("wrong magic, got {:x} {:x}", wparam, lparam);
+                }
+                Some(0)
+            },
             _ => None
         }
     }
 }
 
-fn create_main() -> Result<HWND, Error> {
+fn create_main(shared_hwnd: Arc<AtomicPtr<HWND__>>, xi_peer: XiPeer) -> Result<HWND, Error> {
     unsafe {
         let class_name = "my_window".to_wide();
         let icon = LoadIconW(0 as HINSTANCE, IDI_APPLICATION);
@@ -167,7 +198,9 @@ fn create_main() -> Result<HWND, Error> {
         if class_atom == 0 {
             return Err(Error::Null);
         }
-        let main_win: Rc<Box<WndProc>> = Rc::new(Box::new(MainWin::new(MainWinState::new())));
+        let main_state = MainWinState::new();
+        let main_win: Rc<Box<WndProc>> = Rc::new(Box::new(
+            MainWin::new(shared_hwnd, xi_peer, main_state)));
         let width = 500;  // TODO: scale by dpi
         let height = 400;
         let hwnd = create_window(winapi::WS_EX_OVERLAPPEDWINDOW, class_name.as_ptr(),
@@ -184,12 +217,15 @@ fn create_main() -> Result<HWND, Error> {
 fn main() {
     unsafe {
         SetProcessDpiAwareness(Process_System_DPI_Aware);  // TODO: per monitor (much harder)
-        let hwnd = create_main().unwrap();
+        let shared_hwnd = Arc::new(AtomicPtr::new(null_mut()));
+        let xi_peer = start_xi_thread(shared_hwnd.clone());
+        let hwnd = create_main(shared_hwnd.clone(), xi_peer).unwrap();
+        shared_hwnd.store(hwnd, Ordering::Release);
         ShowWindow(hwnd, SW_SHOWNORMAL);
         UpdateWindow(hwnd);
         let mut msg = mem::uninitialized();
         loop {
-            let bres = GetMessageW(&mut msg, hwnd, 0, 0);
+            let bres = GetMessageW(&mut msg, null_mut(), 0, 0);
             if bres <= 0 {
                 break;
             }
