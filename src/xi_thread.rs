@@ -1,18 +1,15 @@
-use std::boxed;
 use std::io::{self, BufRead, ErrorKind, Read, Write};
-use std::thread;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicPtr, Ordering};
+use std::marker::Send;
+use std::ptr::null_mut;
 use std::sync::mpsc::{channel, Receiver, Sender};
+use std::thread;
+use std::time::Duration;
 
-use user32::PostMessageW;
-use winapi::{HWND__, LPARAM, UINT, WM_USER, WPARAM};
+use kernel32::{CreateSemaphoreW, ReleaseSemaphore};
+use winapi::HANDLE;
 
 use xi_core_lib;
 use xi_rpc::RpcLoop;
-
-pub const XI_FROM_CORE: UINT = WM_USER;
-pub const XI_MAGIC: WPARAM = 0x7869;
 
 pub struct XiPeer {
     tx: Sender<String>,
@@ -20,20 +17,28 @@ pub struct XiPeer {
 
 impl XiPeer {
     pub fn send(&self, s: String) {
-        self.tx.send(s);
+        let _ = self.tx.send(s);
     }
 }
 
-pub fn start_xi_thread(hwnd: Arc<AtomicPtr<HWND__>>) -> XiPeer {
+pub fn start_xi_thread() -> (XiPeer, Receiver<Vec<u8>>, Semaphore) {
     let (to_core_tx, to_core_rx) = channel();
     let to_core_rx = ChanReader(to_core_rx);
-    let from_core_tx = WinMsgWriter(hwnd);
+    let (from_core_tx, from_core_rx) = channel();
+    let semaphore = Semaphore::new();
+    let from_core_tx = ChanWriter {
+        sender: from_core_tx,
+        semaphore: semaphore.clone(),
+    };
     let mut state = xi_core_lib::MainState::new();
     let mut rpc_looper = RpcLoop::new(from_core_tx);
     thread::spawn(move ||
         rpc_looper.mainloop(|| to_core_rx, &mut state)
     );
-    XiPeer { tx: to_core_tx }
+    let peer = XiPeer {
+        tx: to_core_tx,
+    };
+    (peer, from_core_rx, semaphore)
 }
 
 struct ChanReader(Receiver<String>);
@@ -68,10 +73,13 @@ impl BufRead for ChanReader {
     }
 }
 
-struct WinMsgWriter(Arc<AtomicPtr<HWND__>>);
+struct ChanWriter {
+    sender: Sender<Vec<u8>>,
+    semaphore: Semaphore,
+}
 
-impl Write for WinMsgWriter {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+impl Write for ChanWriter {
+    fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
         unreachable!("didn't expect xi-rpc to call write");
     }
 
@@ -81,22 +89,39 @@ impl Write for WinMsgWriter {
 
     fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
         let v = buf.to_vec();
-        // could avoid the double boxing here by using wparam and lparam to represent
-        // length and pointer, and do from_raw_parts trickery, but it's messy...
+        thread::sleep(Duration::from_secs(1));
+        self.sender.send(v).map(|_|
+            self.semaphore.release()
+        ).map_err(|_|
+            io::Error::new(ErrorKind::BrokenPipe, "hwnd destroyed")
+        )
+    }
+}
 
-        // In any case, it's not an ideal protocol, it will leak buffers in flight
-        // when a window is destroyed. Probably better to Arc<Mutex<Deque<String>>>
-        // and just let the window message be a notification to check the queue.
-        let bv = Box::new(v);
-        let hwnd = self.0.load(Ordering::Acquire);
-        if hwnd.is_null() {
-            return Err(io::Error::new(ErrorKind::BrokenPipe, "hwnd destroyed"));
+pub struct Semaphore(HANDLE);
+unsafe impl Send for Semaphore {}
+
+impl Semaphore {
+    fn new() -> Semaphore {
+        unsafe {
+            let handle = CreateSemaphoreW(null_mut(), 0, 0xffff, null_mut());
+            Semaphore(handle)
         }
-        let ok = unsafe { PostMessageW(hwnd, XI_FROM_CORE, XI_MAGIC, Box::into_raw(bv) as LPARAM) };
-        if ok != 0 {
-            Ok(())
-        } else {
-            Err(io::Error::new(ErrorKind::Other, "couldn't PostMessage"))   
+    }
+
+    // Note: this just leaks the semaphore, which is fine for this app,
+    // but in general we'd want to use DuplicateHandle / CloseHandle
+    fn clone(&self) -> Semaphore {
+        Semaphore(self.0)
+    }
+
+    fn release(&self) {
+        unsafe {
+            let _ok = ReleaseSemaphore(self.0, 1, null_mut());
         }
+    }
+
+    pub fn get_handle(&self) -> HANDLE {
+        self.0
     }
 }

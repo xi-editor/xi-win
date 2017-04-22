@@ -1,9 +1,9 @@
-#![feature(rc_raw)] // will stabilize in 1.17
 #![windows_subsystem = "windows"]
 
 extern crate winapi;
 extern crate user32;
 extern crate gdi32;
+extern crate kernel32;
 extern crate direct2d;
 extern crate directwrite;
 
@@ -18,8 +18,7 @@ mod xi_thread;
 use std::cell::RefCell;
 use std::mem;
 use std::ptr::null_mut;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicPtr, Ordering};
+use std::sync::mpsc::TryRecvError;
 use std::rc::Rc;
 
 use user32::*;
@@ -32,7 +31,7 @@ use directwrite::text_format::{self, TextFormat};
 use hwnd_rt::HwndRtParams;
 use util::{Error, ToWide};
 use window::{create_window, WndProc};
-use xi_thread::{start_xi_thread, XI_FROM_CORE, XI_MAGIC, XiPeer};
+use xi_thread::{start_xi_thread, XiPeer};
 
 extern "system" {
     // defined in shcore library
@@ -106,15 +105,13 @@ impl MainWinState {
 }
 
 struct MainWin {
-    shared_hwnd: Arc<AtomicPtr<HWND__>>,
     peer: XiPeer,
     state: RefCell<MainWinState>,
 }
 
 impl MainWin {
-    fn new(shared_hwnd: Arc<AtomicPtr<HWND__>>, peer: XiPeer, state: MainWinState) -> MainWin {
+    fn new(peer: XiPeer, state: MainWinState) -> MainWin {
         MainWin {
-            shared_hwnd: shared_hwnd,
             peer: peer,
             state: RefCell::new(state)
         }
@@ -122,11 +119,10 @@ impl MainWin {
 }
 
 impl WndProc for MainWin {
-    fn window_proc(&self, hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM) -> Option<LRESULT> {
-        //println!("{:x} {:x} {:x}", msg, wparam, lparam);
+    fn window_proc(&self, hwnd: HWND, msg: UINT, _wparam: WPARAM, lparam: LPARAM) -> Option<LRESULT> {
+        //println!("{:x} {:x} {:x}", msg, _wparam, lparam);
         match msg {
             WM_DESTROY => unsafe {
-                self.shared_hwnd.store(null_mut(), Ordering::Release);
                 PostQuitMessage(0);
                 None
             },
@@ -161,22 +157,12 @@ impl WndProc for MainWin {
                 self.peer.send(r#"{"method": "new_tab", "params": [], "id": "0"}"#.to_string());
                 Some(0)
             },
-            XI_FROM_CORE => unsafe {
-                if wparam == XI_MAGIC {
-                    // An assumption that only valid utf-8 is sent. Should be valid.
-                    let buf = Box::from_raw(lparam as *mut String);
-                    print!("{}", &buf);
-                } else {
-                    println!("wrong magic, got {:x} {:x}", wparam, lparam);
-                }
-                Some(0)
-            },
             _ => None
         }
     }
 }
 
-fn create_main(shared_hwnd: Arc<AtomicPtr<HWND__>>, xi_peer: XiPeer) -> Result<HWND, Error> {
+fn create_main(xi_peer: XiPeer) -> Result<HWND, Error> {
     unsafe {
         let class_name = "my_window".to_wide();
         let icon = LoadIconW(0 as HINSTANCE, IDI_APPLICATION);
@@ -200,7 +186,7 @@ fn create_main(shared_hwnd: Arc<AtomicPtr<HWND__>>, xi_peer: XiPeer) -> Result<H
         }
         let main_state = MainWinState::new();
         let main_win: Rc<Box<WndProc>> = Rc::new(Box::new(
-            MainWin::new(shared_hwnd, xi_peer, main_state)));
+            MainWin::new(xi_peer, main_state)));
         let width = 500;  // TODO: scale by dpi
         let height = 400;
         let hwnd = create_window(winapi::WS_EX_OVERLAPPEDWINDOW, class_name.as_ptr(),
@@ -217,20 +203,41 @@ fn create_main(shared_hwnd: Arc<AtomicPtr<HWND__>>, xi_peer: XiPeer) -> Result<H
 fn main() {
     unsafe {
         SetProcessDpiAwareness(Process_System_DPI_Aware);  // TODO: per monitor (much harder)
-        let shared_hwnd = Arc::new(AtomicPtr::new(null_mut()));
-        let xi_peer = start_xi_thread(shared_hwnd.clone());
-        let hwnd = create_main(shared_hwnd.clone(), xi_peer).unwrap();
-        shared_hwnd.store(hwnd, Ordering::Release);
+        let (xi_peer, rx, semaphore) = start_xi_thread();
+        let hwnd = create_main(xi_peer).unwrap();
         ShowWindow(hwnd, SW_SHOWNORMAL);
         UpdateWindow(hwnd);
-        let mut msg = mem::uninitialized();
         loop {
-            let bres = GetMessageW(&mut msg, null_mut(), 0, 0);
-            if bres <= 0 {
-                break;
+            let handles = [semaphore.get_handle()];
+            let _res = MsgWaitForMultipleObjectsEx(
+                handles.len() as u32,
+                handles.as_ptr(),
+                INFINITE,
+                QS_ALLEVENTS,
+                0);
+            loop {
+                let mut msg = mem::uninitialized();
+                let res = PeekMessageW(&mut msg, null_mut(), 0, 0, PM_NOREMOVE);
+                if res == 0 {
+                    break;
+                }
+                let bres = GetMessageW(&mut msg, null_mut(), 0, 0);
+                if bres <= 0 {
+                    return;
+                }
+                TranslateMessage(&mut msg);
+                DispatchMessageW(&mut msg);
             }
-            TranslateMessage(&mut msg);
-            DispatchMessageW(&mut msg);
+            loop {
+                match rx.try_recv() {
+                    Ok(v) => println!("got {:?}", v),
+                    Err(TryRecvError::Disconnected) => {
+                        println!("core disconnected");
+                        break;
+                    }
+                    Err(TryRecvError::Empty) => break,
+                }
+            }
         }
     }
 }

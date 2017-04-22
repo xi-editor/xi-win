@@ -1,7 +1,7 @@
 use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
 
-use winapi::{HRESULT, S_OK};
+use winapi::HRESULT;
 
 #[derive(Debug)]
 pub enum Error {
@@ -9,12 +9,14 @@ pub enum Error {
     Hr(HRESULT),
 }
 
+/*
 pub fn as_result(hr: HRESULT) -> Result<(), Error> {
     match hr {
         S_OK => Ok(()),
         _ => Err(Error::Hr(hr)),
     }
 }
+*/
 
 impl From<HRESULT> for Error {
     fn from(hr: HRESULT) -> Error {
