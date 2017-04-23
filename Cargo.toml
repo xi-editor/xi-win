@@ -1,7 +1,9 @@
 [package]
 name = "wintoy2"
 version = "0.1.0"
+license = "Apache-2.0"
 authors = ["Raph Levien <raph@google.com>"]
+description = "Windows front-end for xi editor."
 
 [dependencies]
 winapi = "0.2"
