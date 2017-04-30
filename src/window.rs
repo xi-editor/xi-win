@@ -17,11 +17,18 @@
 use winapi::*;
 use user32::*;
 
+use serde_json::Value;
+
 use std::mem;
 use std::rc::Rc;
 
 pub trait WndProc {
     fn window_proc(&self, hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM) -> Option<LRESULT>;
+
+    /// A jsonly-typed way of getting commands into the window. It would be good
+    /// to have a better-typed signature, but this will do.
+    #[allow(unused_variables)]
+    fn handle_cmd(&self, v: &Value) {}
 }
 
 pub unsafe extern "system" fn win_proc_dispatch(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM)

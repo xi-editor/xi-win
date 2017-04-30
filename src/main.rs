@@ -31,6 +31,7 @@ extern crate xi_core_lib;
 extern crate xi_rpc;
 
 mod hwnd_rt;
+mod linecache;
 mod util;
 mod window;
 mod xi_thread;
@@ -48,7 +49,10 @@ use direct2d::math::*;
 use direct2d::render_target::DrawTextOption;
 use directwrite::text_format::{self, TextFormat};
 
+use serde_json::Value;
+
 use hwnd_rt::HwndRtParams;
+use linecache::LineCache;
 use util::{Error, ToWide};
 use window::{create_window, WndProc};
 use xi_thread::{start_xi_thread, XiPeer};
@@ -65,6 +69,10 @@ struct Resources {
 }
 
 struct MainWinState {
+    view_id: String,
+    line_cache: LineCache,
+    label: String,
+    self_hwnd: HWND,
     d2d_factory: direct2d::Factory,
     dwrite_factory: directwrite::Factory,
     render_target: Option<RenderTarget>,
@@ -74,6 +82,10 @@ struct MainWinState {
 impl MainWinState {
     fn new() -> MainWinState {
         MainWinState {
+            view_id: String::new(),
+            line_cache: LineCache::new(),
+            label: "hello direct2d".to_string(),
+            self_hwnd: null_mut(),
             d2d_factory: direct2d::Factory::new().unwrap(),
             dwrite_factory: directwrite::Factory::new().unwrap(),
             render_target: None,
@@ -106,16 +118,23 @@ impl MainWinState {
             let size = rt.get_size();
             let rect = RectF::from((0.0, 0.0, size.width, size.height));
             rt.fill_rectangle(&rect, &resources.bg);
+            /*
             rt.draw_line(&Point2F::from((10.0, 50.0)), &Point2F::from((90.0, 90.0)),
                 &resources.fg, 1.0, None);
-            let msg = "Hello DWrite";
-            rt.draw_text(
-                msg,
-                &resources.text_format,
-                &RectF::from((10.0, 10.0, 300.0, 90.0)),
-                &resources.fg,
-                &[DrawTextOption::EnableColorFont]
-            );
+            */
+            let mut y = 10.0;
+            for line_num in 0..self.line_cache.height() {
+                if let Some(line) = self.line_cache.get_line(line_num) {
+                    rt.draw_text(
+                        line.text(),
+                        &resources.text_format,
+                        &RectF::from((10.0, y, 800.0, y + 80.0)),
+                        &resources.fg,
+                        &[DrawTextOption::EnableColorFont]
+                    );
+                }
+                y += 17.5;
+            }
             rt.end_draw()
         };
         if res.is_err() {
@@ -136,13 +155,43 @@ impl MainWin {
             state: RefCell::new(state)
         }
     }
+
+    fn send_notification(&self, method: &str, params: &Value) {
+        let cmd = json!({
+            "method": method,
+            "params": params,
+        });
+        self.peer.send_json(&cmd);
+    }
+
+    // Note: caller can't be borrowing the state.
+    fn send_edit_cmd(&self, method: &str, params: &Value) {
+        let view_id = &self.state.borrow_mut().view_id;
+        let edit_params = json!({
+            "method": method,
+            "params": params,
+            "tab": view_id,
+        });
+        self.send_notification("edit", &edit_params);
+    }
 }
 
 impl WndProc for MainWin {
-    fn window_proc(&self, hwnd: HWND, msg: UINT, _wparam: WPARAM, lparam: LPARAM) -> Option<LRESULT> {
-        //println!("{:x} {:x} {:x}", msg, _wparam, lparam);
+    fn window_proc(&self, hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM) -> Option<LRESULT> {
+        //println!("{:x} {:x} {:x}", msg, wparam, lparam);
         match msg {
+            WM_CREATE => {
+                self.state.borrow_mut().self_hwnd = hwnd;
+                let cmd = json!({
+                    "method": "new_tab",
+                    "params": [],
+                    "id": 0
+                });
+                self.peer.send_json(&cmd);
+                None
+            }
             WM_DESTROY => unsafe {
+                self.state.borrow_mut().self_hwnd = null_mut();
                 PostQuitMessage(0);
                 None
             },
@@ -173,21 +222,43 @@ impl WndProc for MainWin {
                 );
                 None
             },
+            WM_CHAR => {
+                //println!("WM_CHAR {:x} {:x}", wparam, lparam);
+                if wparam == 8 {
+                    self.send_edit_cmd("delete_backward", &json!([]));
+                } else if wparam == 13 {
+                    self.send_edit_cmd("insert_newline", &json!([]));
+                } else if let Some(c) = ::std::char::from_u32(wparam as u32) {
+                    let params = json!({"chars": c.to_string()});
+                    self.send_edit_cmd("insert", &params);
+                }
+                Some(0)
+            }
             WM_LBUTTONDOWN => {
-                let cmd = json!({
-                    "method": "new_tab",
-                    "params": [],
-                    "id": 0
-                });
-                self.peer.send_json(&cmd);
                 Some(0)
             },
             _ => None
         }
     }
+
+    fn handle_cmd(&self, v: &Value) {
+        let mut state = self.state.borrow_mut();
+        //println!("got {:?}", v);
+        if let Some(tab_name) = v["result"].as_str() {
+            // TODO: should match up id etc. This is quick and dirty.
+            state.view_id = tab_name.to_string();
+        } else {
+            let ref method = v["method"];
+            if method == "update" {
+                state.line_cache.apply_update(&v["params"]["update"]);
+            }
+        }
+        state.label = serde_json::to_string(v).unwrap();
+        unsafe { InvalidateRect(state.self_hwnd, null_mut(), 0); }
+    }
 }
 
-fn create_main(xi_peer: XiPeer) -> Result<HWND, Error> {
+fn create_main(xi_peer: XiPeer) -> Result<(HWND, Rc<Box<WndProc>>), Error> {
     unsafe {
         let class_name = "my_window".to_wide();
         let icon = LoadIconW(0 as HINSTANCE, IDI_APPLICATION);
@@ -217,11 +288,11 @@ fn create_main(xi_peer: XiPeer) -> Result<HWND, Error> {
         let hwnd = create_window(winapi::WS_EX_OVERLAPPEDWINDOW, class_name.as_ptr(),
             class_name.as_ptr(), WS_OVERLAPPEDWINDOW | winapi::WS_VSCROLL,
             CW_USEDEFAULT, CW_USEDEFAULT, width, height, 0 as HWND, 0 as HMENU, 0 as HINSTANCE,
-            main_win);
+            main_win.clone());
         if hwnd.is_null() {
             return Err(Error::Null);
         }
-        Ok(hwnd)
+        Ok((hwnd, main_win))
     }
 }
 
@@ -229,7 +300,7 @@ fn main() {
     unsafe {
         SetProcessDpiAwareness(Process_System_DPI_Aware);  // TODO: per monitor (much harder)
         let (xi_peer, rx, semaphore) = start_xi_thread();
-        let hwnd = create_main(xi_peer).unwrap();
+        let (hwnd, main_win) = create_main(xi_peer).unwrap();
         ShowWindow(hwnd, SW_SHOWNORMAL);
         UpdateWindow(hwnd);
         loop {
@@ -255,7 +326,7 @@ fn main() {
             }
             loop {
                 match rx.try_recv() {
-                    Ok(v) => println!("got {:?}", v),
+                    Ok(v) => main_win.handle_cmd(&v),
                     Err(TryRecvError::Disconnected) => {
                         println!("core disconnected");
                         break;

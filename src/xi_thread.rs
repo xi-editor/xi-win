@@ -19,6 +19,7 @@ use std::marker::Send;
 use std::ptr::null_mut;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
+#[allow(unused_imports)]
 use std::time::Duration;
 
 use kernel32::{CreateSemaphoreW, ReleaseSemaphore};
@@ -111,7 +112,7 @@ impl Write for ChanWriter {
 
     fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
         let json = serde_json::from_slice::<Value>(buf).unwrap();
-        thread::sleep(Duration::from_secs(1));
+        //thread::sleep(Duration::from_secs(1));
         self.sender.send(json).map(|_|
             self.semaphore.release()
         ).map_err(|_|
