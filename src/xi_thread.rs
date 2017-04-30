@@ -24,6 +24,8 @@ use std::time::Duration;
 use kernel32::{CreateSemaphoreW, ReleaseSemaphore};
 use winapi::HANDLE;
 
+use serde_json::{self, Value};
+
 use xi_core_lib;
 use xi_rpc::RpcLoop;
 
@@ -35,9 +37,13 @@ impl XiPeer {
     pub fn send(&self, s: String) {
         let _ = self.tx.send(s);
     }
+
+    pub fn send_json(&self, v: &Value) {
+        self.send(serde_json::to_string(v).unwrap());
+    }
 }
 
-pub fn start_xi_thread() -> (XiPeer, Receiver<Vec<u8>>, Semaphore) {
+pub fn start_xi_thread() -> (XiPeer, Receiver<Value>, Semaphore) {
     let (to_core_tx, to_core_rx) = channel();
     let to_core_rx = ChanReader(to_core_rx);
     let (from_core_tx, from_core_rx) = channel();
@@ -90,7 +96,7 @@ impl BufRead for ChanReader {
 }
 
 struct ChanWriter {
-    sender: Sender<Vec<u8>>,
+    sender: Sender<Value>,
     semaphore: Semaphore,
 }
 
@@ -104,9 +110,9 @@ impl Write for ChanWriter {
     }
 
     fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
-        let v = buf.to_vec();
+        let json = serde_json::from_slice::<Value>(buf).unwrap();
         thread::sleep(Duration::from_secs(1));
-        self.sender.send(v).map(|_|
+        self.sender.send(json).map(|_|
             self.semaphore.release()
         ).map_err(|_|
             io::Error::new(ErrorKind::BrokenPipe, "hwnd destroyed")

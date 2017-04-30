@@ -23,6 +23,10 @@ extern crate kernel32;
 extern crate direct2d;
 extern crate directwrite;
 
+extern crate serde;
+#[macro_use]
+extern crate serde_json;
+
 extern crate xi_core_lib;
 extern crate xi_rpc;
 
@@ -170,7 +174,12 @@ impl WndProc for MainWin {
                 None
             },
             WM_LBUTTONDOWN => {
-                self.peer.send(r#"{"method": "new_tab", "params": [], "id": "0"}"#.to_string());
+                let cmd = json!({
+                    "method": "new_tab",
+                    "params": [],
+                    "id": 0
+                });
+                self.peer.send_json(&cmd);
                 Some(0)
             },
             _ => None
