@@ -48,6 +48,7 @@ use direct2d::{RenderTarget, brush};
 use direct2d::math::*;
 use direct2d::render_target::DrawTextOption;
 use directwrite::text_format::{self, TextFormat};
+use directwrite::text_layout::{self, TextLayout};
 
 use serde_json::Value;
 
@@ -66,6 +67,18 @@ struct Resources {
     fg: brush::SolidColor,
     bg: brush::SolidColor,
     text_format: TextFormat,
+}
+
+impl Resources {
+    fn create_text_layout(&self, factory: &directwrite::Factory, text: &str) -> TextLayout {
+        let params = text_layout::ParamBuilder::new()
+            .text(text)
+            .font(self.text_format.clone())
+            .width(1e6)
+            .height(1e6)
+            .build().unwrap();
+        factory.create(params).unwrap()
+    }
 }
 
 struct MainWinState {
@@ -118,22 +131,28 @@ impl MainWinState {
             let size = rt.get_size();
             let rect = RectF::from((0.0, 0.0, size.width, size.height));
             rt.fill_rectangle(&rect, &resources.bg);
-            /*
-            rt.draw_line(&Point2F::from((10.0, 50.0)), &Point2F::from((90.0, 90.0)),
-                &resources.fg, 1.0, None);
-            */
-            let mut y = 10.0;
+
+            let x0 = 6.0;
+            let mut y = 6.0;
             for line_num in 0..self.line_cache.height() {
                 if let Some(line) = self.line_cache.get_line(line_num) {
-                    rt.draw_text(
-                        line.text(),
-                        &resources.text_format,
-                        &RectF::from((10.0, y, 800.0, y + 80.0)),
+                    let layout = resources.create_text_layout(&self.dwrite_factory, line.text());
+                    rt.draw_text_layout(
+                        &Point2F::from((x0, y)),
+                        &layout,
                         &resources.fg,
                         &[DrawTextOption::EnableColorFont]
                     );
+                    for &offset in line.cursor() {
+                        if let Some(pos) = layout.hit_test_text_position(offset as u32, true) {
+                            let x = x0 + pos.point_x;
+                            rt.draw_line(&Point2F::from((x, y)),
+                                &Point2F::from((x, y + 17.0)),
+                                &resources.fg, 1.0, None);
+                        }
+                    }
                 }
-                y += 17.5;
+                y += 17.0;
             }
             rt.end_draw()
         };

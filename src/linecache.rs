@@ -18,17 +18,28 @@ use serde_json::Value;
 
 pub struct Line {
     text: String,
+    cursor: Vec<usize>,
 }
 
 impl Line {
     pub fn from_json(v: &Value) -> Line {
-        Line {
-            text: v["text"].as_str().unwrap().to_owned(),
+        let text = v["text"].as_str().unwrap().to_owned();
+        let mut cursor = Vec::new();
+        if let Some(arr) = v["cursor"].as_array() {
+            for c in arr {
+                // TODO: this is probably the best place to convert to utf-16
+                cursor.push(c.as_u64().unwrap() as usize);
+            }
         }
+        Line { text, cursor }
     }
 
     pub fn text(&self) -> &str {
         &self.text
+    }
+
+    pub fn cursor(&self) -> &[usize] {
+        &self.cursor
     }
 }
 
