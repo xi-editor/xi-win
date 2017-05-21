@@ -242,17 +242,55 @@ impl WndProc for MainWin {
                 None
             },
             WM_CHAR => {
-                //println!("WM_CHAR {:x} {:x}", wparam, lparam);
-                if wparam == 8 {
-                    self.send_edit_cmd("delete_backward", &json!([]));
-                } else if wparam == 13 {
-                    self.send_edit_cmd("insert_newline", &json!([]));
-                } else if let Some(c) = ::std::char::from_u32(wparam as u32) {
-                    let params = json!({"chars": c.to_string()});
-                    self.send_edit_cmd("insert", &params);
+                // let paramsString = format!("{:x} {:x} {:x}\n", msg, wparam, lparam);
+                // let params = json!({"chars": paramsString});
+                // self.send_edit_cmd("insert", &params);
+                // println!("WM_CHAR {:x} {:x}", wparam, lparam);
+                match wparam as i32 {
+                    VK_BACK => {
+                        self.send_edit_cmd("delete_backward", &json!([]));
+                        Some(0)
+                    },
+                    VK_RETURN => {
+                        self.send_edit_cmd("insert_newline", &json!([]));
+                        Some(0)
+                    },
+                    _ => {
+                        if let Some(c) = ::std::char::from_u32(wparam as u32) {
+                            let params = json!({"chars": c.to_string()});
+                            self.send_edit_cmd("insert", &params);
+                            return Some(0)
+                        }
+                        None
+                    }
                 }
-                Some(0)
             }
+            WM_KEYDOWN => {
+                // Handle special keys here
+                match wparam as i32 {
+                    VK_UP => {
+                        self.send_edit_cmd("move_up", &json!([]));
+                        Some(0)
+                    },
+                    VK_DOWN => {
+                        self.send_edit_cmd("move_down", &json!([]));
+                        Some(0)
+                    },
+                    VK_LEFT => {
+                        self.send_edit_cmd("move_left", &json!([]));
+                        Some(0)
+                    },
+                    VK_RIGHT => {
+                        self.send_edit_cmd("move_right", &json!([]));
+                        Some(0)
+                    },
+                    VK_DELETE => {
+                        self.send_edit_cmd("delete_forward", &json!([]));
+                        Some(0)
+                    },
+                    _ => None
+                }
+            },
             WM_LBUTTONDOWN => {
                 Some(0)
             },
@@ -279,7 +317,7 @@ impl WndProc for MainWin {
 
 fn create_main(xi_peer: XiPeer) -> Result<(HWND, Rc<Box<WndProc>>), Error> {
     unsafe {
-        let class_name = "my_window".to_wide();
+        let class_name = "Xi Editor".to_wide();
         let icon = LoadIconW(0 as HINSTANCE, IDI_APPLICATION);
         let cursor = LoadCursorW(0 as HINSTANCE, IDC_IBEAM);
         let brush = gdi32::CreateSolidBrush(0xffffff);
