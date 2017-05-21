@@ -61,6 +61,7 @@ use xi_thread::{start_xi_thread, XiPeer};
 extern "system" {
     // defined in shcore library
     pub fn SetProcessDpiAwareness(value: PROCESS_DPI_AWARENESS) -> HRESULT;
+    pub fn GetDpiForSystem() -> UINT;
 }
 
 struct Resources {
@@ -340,8 +341,12 @@ fn create_main(xi_peer: XiPeer) -> Result<(HWND, Rc<Box<WndProc>>), Error> {
         let main_state = MainWinState::new();
         let main_win: Rc<Box<WndProc>> = Rc::new(Box::new(
             MainWin::new(xi_peer, main_state)));
-        let width = 500;  // TODO: scale by dpi
-        let height = 400;
+
+        // Simple scaling based on System Dpi (96 is equivalent to 100%)
+        let dpi = GetDpiForSystem() as i32;
+        let width = 500 * (dpi/96);
+        let height = 400 * (dpi/96);
+
         let hwnd = create_window(winapi::WS_EX_OVERLAPPEDWINDOW, class_name.as_ptr(),
             class_name.as_ptr(), WS_OVERLAPPEDWINDOW | winapi::WS_VSCROLL,
             CW_USEDEFAULT, CW_USEDEFAULT, width, height, 0 as HWND, 0 as HMENU, 0 as HINSTANCE,
