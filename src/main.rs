@@ -283,7 +283,11 @@ impl WndProc for MainWin {
                     VK_RIGHT => {
                         self.send_edit_cmd("move_right", &json!([]));
                         Some(0)
-                    }
+                    },
+                    VK_DELETE => {
+                        self.send_edit_cmd("delete_forward", &json!([]));
+                        Some(0)
+                    },
                     _ => None
                 }
             },
