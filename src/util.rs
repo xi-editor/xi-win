@@ -16,8 +16,9 @@
 
 use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
+use std::slice;
 
-use winapi::HRESULT;
+use winapi::{HRESULT, LPWSTR};
 
 #[derive(Debug)]
 pub enum Error {
@@ -51,5 +52,27 @@ impl<T> ToWide for T where T: AsRef<OsStr> {
     }
     fn to_wide(&self) -> Vec<u16> {
         self.as_ref().encode_wide().chain(Some(0)).collect()
+    }
+}
+
+pub trait FromWide {
+    fn from_wide(&self) -> Option<String>;
+}
+
+impl FromWide for LPWSTR {
+    fn from_wide(&self) -> Option<String> {
+        unsafe {
+            let mut len = 0;
+            while *self.offset(len) != 0 {
+                len += 1;
+            }
+            slice::from_raw_parts(*self, len as usize).from_wide()
+        }
+    }
+}
+
+impl FromWide for [u16] {
+    fn from_wide(&self) -> Option<String> {
+        String::from_utf16(self).ok()
     }
 }
