@@ -20,6 +20,8 @@ extern crate winapi;
 extern crate user32;
 extern crate gdi32;
 extern crate kernel32;
+extern crate ole32;
+extern crate uuid;
 extern crate direct2d;
 extern crate directwrite;
 
@@ -32,6 +34,7 @@ extern crate xi_rpc;
 
 mod hwnd_rt;
 mod linecache;
+mod menus;
 mod util;
 mod window;
 mod xi_thread;
@@ -54,7 +57,8 @@ use serde_json::Value;
 
 use hwnd_rt::HwndRtParams;
 use linecache::LineCache;
-use util::{Error, ToWide};
+use menus::Menus;
+use util::{Error, FromWide, ToWide};
 use window::{create_window, WndProc};
 use xi_thread::{start_xi_thread, XiPeer};
 
@@ -194,6 +198,40 @@ impl MainWin {
         });
         self.send_notification("edit", &edit_params);
     }
+
+    fn file_open(&self, hwnd_owner: HWND) {
+        unsafe {
+            let mut pfd: *mut IFileDialog = null_mut();
+            let hr = ole32::CoCreateInstance(&uuid::CLSID_FileOpenDialog,
+                null_mut(),
+                winapi::CLSCTX_INPROC_SERVER,
+                &uuid::IID_IFileOpenDialog,
+                &mut pfd as *mut *mut winapi::IFileDialog as *mut winapi::LPVOID
+                );
+            if hr != winapi::S_OK {
+                return;  // TODO: should be error result
+            }
+            (*pfd).Show(hwnd_owner);
+            let mut result: *mut winapi::IShellItem = null_mut();
+            (*pfd).GetResult(&mut result);
+            if !result.is_null() {
+                let mut display_name: LPWSTR = null_mut();
+                (*result).GetDisplayName(SIGDN_FILESYSPATH, &mut display_name);
+                if let Some(filename) = display_name.from_wide() {
+                    // Note: this whole protocol has changed a lot since the
+                    // 0.2 version of xi-core.
+                    self.send_edit_cmd("open", &json!({
+                        "filename": filename,
+                    }));
+                }
+                ole32::CoTaskMemFree(display_name as LPVOID);
+                (*result).Release();
+            } else {
+                //println!("result is null");
+            }
+            (*pfd).Release();
+        }
+    }
 }
 
 impl WndProc for MainWin {
@@ -295,6 +333,18 @@ impl WndProc for MainWin {
             WM_LBUTTONDOWN => {
                 Some(0)
             },
+            WM_COMMAND => unsafe {
+                match wparam {
+                    x if x == menus::MenuEntries::Exit as WPARAM => {
+                        DestroyWindow(hwnd);
+                    }
+                    x if x == menus::MenuEntries::Open as WPARAM => {
+                        self.file_open(hwnd);
+                    }
+                    _ => return Some(1),
+                }
+                Some(0)
+            },
             _ => None
         }
     }
@@ -347,9 +397,11 @@ fn create_main(xi_peer: XiPeer) -> Result<(HWND, Rc<Box<WndProc>>), Error> {
         let width = (500.0 * (dpi/96.0)) as i32;
         let height = (400.0 * (dpi/96.0)) as i32;
 
+        let menus = Menus::create();
+        let hmenu = menus.get_hmenubar();
         let hwnd = create_window(winapi::WS_EX_OVERLAPPEDWINDOW, class_name.as_ptr(),
             class_name.as_ptr(), WS_OVERLAPPEDWINDOW | winapi::WS_VSCROLL,
-            CW_USEDEFAULT, CW_USEDEFAULT, width, height, 0 as HWND, 0 as HMENU, 0 as HINSTANCE,
+            CW_USEDEFAULT, CW_USEDEFAULT, width, height, 0 as HWND, hmenu, 0 as HINSTANCE,
             main_win.clone());
         if hwnd.is_null() {
             return Err(Error::Null);
