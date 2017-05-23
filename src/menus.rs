@@ -20,7 +20,7 @@ use winapi::*;
 use util::ToWide;
 
 #[repr(u32)]
-pub enum MyIds {
+pub enum MenuEntries {
     Exit = 0x100,
     Open,
 }
@@ -36,8 +36,8 @@ impl Menus {
             let hmenubar = CreateMenu();
             let hmenu = CreateMenu();
             AppendMenuW(hmenubar, MF_POPUP, hmenu as UINT_PTR, "&File".to_wide().as_ptr());
-            AppendMenuW(hmenu, MF_STRING, MyIds::Open as UINT_PTR, "&Open\tCtrl+O".to_wide().as_ptr());
-            AppendMenuW(hmenu, MF_STRING, MyIds::Exit as UINT_PTR, "E&xit".to_wide().as_ptr());
+            AppendMenuW(hmenu, MF_STRING, MenuEntries::Open as UINT_PTR, "&Open\tCtrl+O".to_wide().as_ptr());
+            AppendMenuW(hmenu, MF_STRING, MenuEntries::Exit as UINT_PTR, "E&xit".to_wide().as_ptr());
 
             let hmenu = CreateMenu();
             AppendMenuW(hmenubar, MF_POPUP, hmenu as UINT_PTR, "&Edit".to_wide().as_ptr());

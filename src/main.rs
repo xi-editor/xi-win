@@ -334,10 +334,10 @@ impl WndProc for MainWin {
             },
             WM_COMMAND => unsafe {
                 match wparam {
-                    x if x == menus::MyIds::Exit as WPARAM => {
+                    x if x == menus::MenuEntries::Exit as WPARAM => {
                         DestroyWindow(hwnd);
                     }
-                    x if x == menus::MyIds::Open as WPARAM => {
+                    x if x == menus::MenuEntries::Open as WPARAM => {
                         self.file_open(hwnd);
                     }
                     _ => return Some(1),
