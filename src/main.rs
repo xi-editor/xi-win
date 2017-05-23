@@ -343,9 +343,9 @@ fn create_main(xi_peer: XiPeer) -> Result<(HWND, Rc<Box<WndProc>>), Error> {
             MainWin::new(xi_peer, main_state)));
 
         // Simple scaling based on System Dpi (96 is equivalent to 100%)
-        let dpi = GetDpiForSystem() as i32;
-        let width = 500 * (dpi/96);
-        let height = 400 * (dpi/96);
+        let dpi = GetDpiForSystem() as f32;
+        let width = (500.0 * (dpi/96.0)) as i32;
+        let height = (400.0 * (dpi/96.0)) as i32;
 
         let hwnd = create_window(winapi::WS_EX_OVERLAPPEDWINDOW, class_name.as_ptr(),
             class_name.as_ptr(), WS_OVERLAPPEDWINDOW | winapi::WS_VSCROLL,
