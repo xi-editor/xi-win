@@ -14,7 +14,7 @@
 
 //! The main module for the xi editor front end.
 
-//#![windows_subsystem = "windows"] // Note: This disables stdout, so no println :(
+#![windows_subsystem = "windows"] // NOTE: This disables stdout, so no println :(
 
 extern crate winapi;
 extern crate user32;
@@ -58,7 +58,7 @@ use serde_json::Value;
 use hwnd_rt::HwndRtParams;
 use linecache::LineCache;
 use menus::Menus;
-use util::{Error, FromWide, ToWide};
+use util::{Error, FromWide, ToWide, OptionalFunctions};
 use window::{create_window, WndProc};
 use xi_thread::{start_xi_thread, XiPeer};
 
@@ -360,7 +360,7 @@ impl WndProc for MainWin {
     }
 }
 
-fn create_main(xi_peer: XiPeer) -> Result<(HWND, Rc<Box<WndProc>>), Error> {
+fn create_main(optional_functions: &OptionalFunctions, xi_peer: XiPeer) -> Result<(HWND, Rc<Box<WndProc>>), Error> {
     unsafe {
         let class_name = "Xi Editor".to_wide();
         let icon = LoadIconW(0 as HINSTANCE, IDI_APPLICATION);
@@ -387,8 +387,13 @@ fn create_main(xi_peer: XiPeer) -> Result<(HWND, Rc<Box<WndProc>>), Error> {
             MainWin::new(xi_peer, main_state)));
 
         // Simple scaling based on System Dpi (96 is equivalent to 100%)
-//        let dpi = GetDpiForSystem() as f32; // TODO dynamically load!
-        let dpi = 96.0;
+        let dpi = if let Some(func) = optional_functions.get_dpi_for_system {
+            // Only supported on windows 10
+            func() as f32
+        } else {
+            // TODO GetDpiForMonitor is supported on windows 8.1, try falling back to that here
+            96.0
+        };
         let width = (500.0 * (dpi/96.0)) as i32;
         let height = (400.0 * (dpi/96.0)) as i32;
 
@@ -409,10 +414,13 @@ fn main() {
     let optional_functions = util::load_optional_functions();
 
     unsafe {
-        // TODO reenable
-//        SetProcessDpiAwareness(Process_System_DPI_Aware);  // TODO: per monitor (much harder)
+        if let Some(func) = optional_functions.set_process_dpi_awareness {
+            // This function is only supported on windows 10
+            func(Process_System_DPI_Aware); // TODO: per monitor (much harder)
+        }
+
         let (xi_peer, rx, semaphore) = start_xi_thread();
-        let (hwnd, main_win) = create_main(xi_peer).unwrap();
+        let (hwnd, main_win) = create_main(&optional_functions, xi_peer).unwrap();
         ShowWindow(hwnd, SW_SHOWNORMAL);
         UpdateWindow(hwnd);
 
