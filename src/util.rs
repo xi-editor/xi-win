@@ -17,7 +17,7 @@
 //! Also includes some code to dynamically load functions at runtime. This is needed for functions
 //! which are only supported on certain versions of windows.
 
-use std::ffi::OsStr;
+use std::ffi::{OsStr, CString};
 use std::os::windows::ffi::OsStrExt;
 use std::slice;
 use std::mem;
@@ -89,73 +89,67 @@ type GetDpiForMonitor = unsafe extern "system" fn(HMONITOR, MONITOR_DPI_TYPE, *m
 // from user32.dll
 type SetProcessDpiAwareness = unsafe extern "system" fn(PROCESS_DPI_AWARENESS) -> HRESULT;
 
+#[allow(non_snake_case)] // For member fields
 pub struct OptionalFunctions {
-    pub get_dpi_for_system: Option<GetDpiForSystem>,
-    pub get_dpi_for_monitor: Option<GetDpiForMonitor>,
-    pub set_process_dpi_awareness: Option<SetProcessDpiAwareness>,
+    pub GetDpiForSystem: Option<GetDpiForSystem>,
+    pub GetDpiForMonitor: Option<GetDpiForMonitor>,
+    pub SetProcessDpiAwareness: Option<SetProcessDpiAwareness>,
 }
 
-pub fn load_optional_functions() -> OptionalFunctions {
-    let mut get_dpi_for_system = None;
-    let mut get_dpi_for_monitor = None;
-    let mut set_process_dpi_awareness = None;
+#[allow(non_snake_case)] // For local variables
+pub fn load_optional_functions() -> OptionalFunctions { 
+    // Tries to load $function from $lib. $function should be one of the types defined just before 
+    // `load_optional_functions`. This sets the corresponding local field to `Some(function pointer)`
+    // if it manages to load the function.
+    macro_rules! load_function {
+        ($lib: expr, $function: ident, $min_windows_version: expr) => {{
+            let name = stringify!($function);
 
-    let shcore_lib_name = b"shcore.dll\0";
-    let shcore_lib = unsafe { LoadLibraryA(shcore_lib_name.as_ptr() as *const CHAR) };
+            // The `unwrap` is fine, because we only call this macro for winapi functions, which
+            // have simple ascii-only names
+            let cstr = CString::new(name).unwrap();
 
-    if shcore_lib.is_null() {
-        println!("No shcore.dll");
-    } else {
-        // Load GetDpiForSystem
-        // TODO (seventh-chord, 15.10.17) somebody with win10 needs to test this
-        let name = b"GetDpiForSystem\0";
-        let name_ptr = name.as_ptr() as *const CHAR;
-        let function_ptr = unsafe { GetProcAddress(shcore_lib, name_ptr) };
+            let function_ptr = unsafe { GetProcAddress($lib, cstr.as_ptr()) };
 
-        if function_ptr.is_null() {
-            println!("Could not load GetDpiForSystem (Only on windows 10)");
-        } else {
-            let function = unsafe { mem::transmute::<_, GetDpiForSystem>(function_ptr) };
-            get_dpi_for_system = Some(function);
-        }
-
-        // Load GetDpiForMonitor
-        let name = b"GetDpiForMonitor\0";
-        let name_ptr = name.as_ptr() as *const CHAR;
-        let function_ptr = unsafe { GetProcAddress(shcore_lib, name_ptr) };
-
-        if function_ptr.is_null() {
-            println!("Could not load GetDpiForMonitor (Only on windows 8.1 or later)");
-        } else {
-            let function = unsafe { mem::transmute::<_, GetDpiForMonitor>(function_ptr) };
-            get_dpi_for_monitor = Some(function);
-        }
+            if function_ptr.is_null() {
+                println!(
+                    "Could not load `{}`. Windows {} or later is needed",
+                    name, $min_windows_version
+                );
+            } else {
+                let function = unsafe { mem::transmute::<_, $function>(function_ptr) };
+                $function = Some(function);
+            }
+        }};
     }
 
-    let user32_lib_name = b"user32.dll\0";
-    let user32_lib = unsafe { LoadLibraryA(user32_lib_name.as_ptr() as *const CHAR) };
+    // TODO (seventh-chord, 15.10.17) somebody with win10 needs to test those which are marked "10"
 
-    if user32_lib.is_null() {
+    let mut GetDpiForSystem = None;
+    let mut GetDpiForMonitor = None;
+
+    let shcore_lib_name = b"shcore.dll\0";
+    let shcore = unsafe { LoadLibraryA(shcore_lib_name.as_ptr() as *const CHAR) };
+    if shcore.is_null() {
+        println!("No shcore.dll");
+    } else {
+        load_function!(shcore, GetDpiForSystem, "10");
+        load_function!(shcore, GetDpiForMonitor, "8.1");
+    }
+
+    let mut SetProcessDpiAwareness = None;
+
+    let user32_lib_name = b"user32.dll\0";
+    let user32 = unsafe { LoadLibraryA(user32_lib_name.as_ptr() as *const CHAR) };
+    if user32.is_null() {
         println!("No user32.dll");
     } else {
-        // Load SetProcessDpiAwareness
-        // TODO (seventh-chord, 15.10.17) somebody with win10 needs to test this
-        let name = b"SetProcessDpiAwareness\0";
-        let name_ptr = name.as_ptr() as *const CHAR;
-        let function_ptr = unsafe { GetProcAddress(user32_lib, name_ptr) };
-
-        if function_ptr.is_null() {
-            get_dpi_for_system = None;
-            println!("Could not load SetProcessDpiAwareness (Only on windows 10)");
-        } else {
-            let function = unsafe { mem::transmute::<_, SetProcessDpiAwareness>(function_ptr) };
-            set_process_dpi_awareness = Some(function);
-        }
+        load_function!(user32, SetProcessDpiAwareness, "10");
     }
 
     OptionalFunctions {
-        get_dpi_for_system,
-        get_dpi_for_monitor,
-        set_process_dpi_awareness,
+        GetDpiForSystem,
+        GetDpiForMonitor,
+        SetProcessDpiAwareness,
     }
 }

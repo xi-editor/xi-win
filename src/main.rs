@@ -387,7 +387,7 @@ fn create_main(optional_functions: &OptionalFunctions, xi_peer: XiPeer) -> Resul
             MainWin::new(xi_peer, main_state)));
 
         // Simple scaling based on System Dpi (96 is equivalent to 100%)
-        let dpi = if let Some(func) = optional_functions.get_dpi_for_system {
+        let dpi = if let Some(func) = optional_functions.GetDpiForSystem {
             // Only supported on windows 10
             func() as f32
         } else {
@@ -414,7 +414,7 @@ fn main() {
     let optional_functions = util::load_optional_functions();
 
     unsafe {
-        if let Some(func) = optional_functions.set_process_dpi_awareness {
+        if let Some(func) = optional_functions.SetProcessDpiAwareness {
             // This function is only supported on windows 10
             func(Process_System_DPI_Aware); // TODO: per monitor (much harder)
         }
