@@ -14,7 +14,7 @@
 
 //! The main module for the xi editor front end.
 
-#![windows_subsystem = "windows"]
+//#![windows_subsystem = "windows"] // Note: This disables stdout, so no println :(
 
 extern crate winapi;
 extern crate user32;
@@ -61,12 +61,6 @@ use menus::Menus;
 use util::{Error, FromWide, ToWide};
 use window::{create_window, WndProc};
 use xi_thread::{start_xi_thread, XiPeer};
-
-extern "system" {
-    // defined in shcore library
-    pub fn SetProcessDpiAwareness(value: PROCESS_DPI_AWARENESS) -> HRESULT;
-    pub fn GetDpiForSystem() -> UINT;
-}
 
 struct Resources {
     fg: brush::SolidColor,
@@ -393,7 +387,8 @@ fn create_main(xi_peer: XiPeer) -> Result<(HWND, Rc<Box<WndProc>>), Error> {
             MainWin::new(xi_peer, main_state)));
 
         // Simple scaling based on System Dpi (96 is equivalent to 100%)
-        let dpi = GetDpiForSystem() as f32;
+//        let dpi = GetDpiForSystem() as f32; // TODO dynamically load!
+        let dpi = 96.0;
         let width = (500.0 * (dpi/96.0)) as i32;
         let height = (400.0 * (dpi/96.0)) as i32;
 
@@ -411,12 +406,16 @@ fn create_main(xi_peer: XiPeer) -> Result<(HWND, Rc<Box<WndProc>>), Error> {
 }
 
 fn main() {
+    let optional_functions = util::load_optional_functions();
+
     unsafe {
-        SetProcessDpiAwareness(Process_System_DPI_Aware);  // TODO: per monitor (much harder)
+        // TODO reenable
+//        SetProcessDpiAwareness(Process_System_DPI_Aware);  // TODO: per monitor (much harder)
         let (xi_peer, rx, semaphore) = start_xi_thread();
         let (hwnd, main_win) = create_main(xi_peer).unwrap();
         ShowWindow(hwnd, SW_SHOWNORMAL);
         UpdateWindow(hwnd);
+
         loop {
             let handles = [semaphore.get_handle()];
             let _res = MsgWaitForMultipleObjectsEx(
@@ -424,20 +423,25 @@ fn main() {
                 handles.as_ptr(),
                 INFINITE,
                 QS_ALLEVENTS,
-                0);
+                0
+            );
+
+            // Handle windows messages
             loop {
                 let mut msg = mem::uninitialized();
                 let res = PeekMessageW(&mut msg, null_mut(), 0, 0, PM_NOREMOVE);
                 if res == 0 {
                     break;
                 }
-                let bres = GetMessageW(&mut msg, null_mut(), 0, 0);
-                if bres <= 0 {
+                let res = GetMessageW(&mut msg, null_mut(), 0, 0);
+                if res <= 0 {
                     return;
                 }
                 TranslateMessage(&mut msg);
                 DispatchMessageW(&mut msg);
             }
+
+            // Handle xi events
             loop {
                 match rx.try_recv() {
                     Ok(v) => main_win.handle_cmd(&v),
