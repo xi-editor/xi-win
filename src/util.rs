@@ -22,8 +22,8 @@ use std::os::windows::ffi::OsStrExt;
 use std::slice;
 use std::mem;
 
-use winapi::{HRESULT, LPWSTR, UINT, HMONITOR, MONITOR_DPI_TYPE, PROCESS_DPI_AWARENESS, CHAR};
-use kernel32::{LoadLibraryA, GetProcAddress};
+use winapi::{HRESULT, LPWSTR, UINT, HMODULE, HMONITOR, MONITOR_DPI_TYPE, PROCESS_DPI_AWARENESS};
+use kernel32::{LoadLibraryW, GetModuleHandleW, GetProcAddress};
 
 #[derive(Debug)]
 pub enum Error {
@@ -123,13 +123,28 @@ pub fn load_optional_functions() -> OptionalFunctions {
         }};
     }
 
-    // TODO (seventh-chord, 15.10.17) somebody with win10 needs to test those which are marked "10"
+    fn load_library(name: &str) -> HMODULE {
+        let encoded_name = name.to_wide();
+
+        // If we allready have loaded the library (somewhere else in the process) we don't need to
+        // call LoadLibrary again
+        let library = unsafe { GetModuleHandleW(encoded_name.as_ptr()) };
+        if !library.is_null() {
+            return library;
+        }
+
+        let library = unsafe { LoadLibraryW(encoded_name.as_ptr()) };
+        return library;
+    }
+
+    let shcore = load_library("shcore.dll");
+    let user32 = load_library("user32.dll");
 
     let mut GetDpiForSystem = None;
     let mut GetDpiForMonitor = None;
+    let mut SetProcessDpiAwareness = None;
 
-    let shcore_lib_name = b"shcore.dll\0";
-    let shcore = unsafe { LoadLibraryA(shcore_lib_name.as_ptr() as *const CHAR) };
+    // TODO (seventh-chord, 15.10.17) somebody with win10 needs to test those which are marked "10"
     if shcore.is_null() {
         println!("No shcore.dll");
     } else {
@@ -137,10 +152,6 @@ pub fn load_optional_functions() -> OptionalFunctions {
         load_function!(shcore, GetDpiForMonitor, "8.1");
     }
 
-    let mut SetProcessDpiAwareness = None;
-
-    let user32_lib_name = b"user32.dll\0";
-    let user32 = unsafe { LoadLibraryA(user32_lib_name.as_ptr() as *const CHAR) };
     if user32.is_null() {
         println!("No user32.dll");
     } else {
