@@ -148,14 +148,14 @@ pub fn load_optional_functions() -> OptionalFunctions {
     if shcore.is_null() {
         println!("No shcore.dll");
     } else {
-        load_function!(shcore, GetDpiForSystem, "10");
+        load_function!(shcore, SetProcessDpiAwareness, "8.1");
         load_function!(shcore, GetDpiForMonitor, "8.1");
     }
 
     if user32.is_null() {
         println!("No user32.dll");
     } else {
-        load_function!(user32, SetProcessDpiAwareness, "10");
+        load_function!(user32, GetDpiForSystem, "10");
     }
 
     OptionalFunctions {
