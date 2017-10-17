@@ -12,18 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Various utilities for working with windows. Includes utilities for converting between Windows 
-//! and Rust types, including strings. 
-//! Also includes some code to dynamically load functions at runtime. This is needed for functions
-//! which are only supported on certain versions of windows.
+//! Utilities for converting between Windows and Rust types, including strings.
 
-use std::ffi::{OsStr, CString};
+use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
 use std::slice;
-use std::mem;
 
-use winapi::{HRESULT, LPWSTR, UINT, HMODULE, HMONITOR, MONITOR_DPI_TYPE, PROCESS_DPI_AWARENESS};
-use kernel32::{LoadLibraryW, GetModuleHandleW, GetProcAddress};
+use winapi::{HRESULT, LPWSTR};
 
 #[derive(Debug)]
 pub enum Error {
@@ -79,88 +74,5 @@ impl FromWide for LPWSTR {
 impl FromWide for [u16] {
     fn from_wide(&self) -> Option<String> {
         String::from_utf16(self).ok()
-    }
-}
-
-// Types for functions we want to load, which are only supported on newer windows versions
-// from shcore.dll
-type GetDpiForSystem = unsafe extern "system" fn() -> UINT;
-type GetDpiForMonitor = unsafe extern "system" fn(HMONITOR, MONITOR_DPI_TYPE, *mut UINT, *mut UINT);
-// from user32.dll
-type SetProcessDpiAwareness = unsafe extern "system" fn(PROCESS_DPI_AWARENESS) -> HRESULT;
-
-#[allow(non_snake_case)] // For member fields
-pub struct OptionalFunctions {
-    pub GetDpiForSystem: Option<GetDpiForSystem>,
-    pub GetDpiForMonitor: Option<GetDpiForMonitor>,
-    pub SetProcessDpiAwareness: Option<SetProcessDpiAwareness>,
-}
-
-#[allow(non_snake_case)] // For local variables
-pub fn load_optional_functions() -> OptionalFunctions { 
-    // Tries to load $function from $lib. $function should be one of the types defined just before 
-    // `load_optional_functions`. This sets the corresponding local field to `Some(function pointer)`
-    // if it manages to load the function.
-    macro_rules! load_function {
-        ($lib: expr, $function: ident, $min_windows_version: expr) => {{
-            let name = stringify!($function);
-
-            // The `unwrap` is fine, because we only call this macro for winapi functions, which
-            // have simple ascii-only names
-            let cstr = CString::new(name).unwrap();
-
-            let function_ptr = unsafe { GetProcAddress($lib, cstr.as_ptr()) };
-
-            if function_ptr.is_null() {
-                println!(
-                    "Could not load `{}`. Windows {} or later is needed",
-                    name, $min_windows_version
-                );
-            } else {
-                let function = unsafe { mem::transmute::<_, $function>(function_ptr) };
-                $function = Some(function);
-            }
-        }};
-    }
-
-    fn load_library(name: &str) -> HMODULE {
-        let encoded_name = name.to_wide();
-
-        // If we allready have loaded the library (somewhere else in the process) we don't need to
-        // call LoadLibrary again
-        let library = unsafe { GetModuleHandleW(encoded_name.as_ptr()) };
-        if !library.is_null() {
-            return library;
-        }
-
-        let library = unsafe { LoadLibraryW(encoded_name.as_ptr()) };
-        return library;
-    }
-
-    let shcore = load_library("shcore.dll");
-    let user32 = load_library("user32.dll");
-
-    let mut GetDpiForSystem = None;
-    let mut GetDpiForMonitor = None;
-    let mut SetProcessDpiAwareness = None;
-
-    // TODO (seventh-chord, 15.10.17) somebody with win10 needs to test those which are marked "10"
-    if shcore.is_null() {
-        println!("No shcore.dll");
-    } else {
-        load_function!(shcore, GetDpiForSystem, "10");
-        load_function!(shcore, GetDpiForMonitor, "8.1");
-    }
-
-    if user32.is_null() {
-        println!("No user32.dll");
-    } else {
-        load_function!(user32, SetProcessDpiAwareness, "10");
-    }
-
-    OptionalFunctions {
-        GetDpiForSystem,
-        GetDpiForMonitor,
-        SetProcessDpiAwareness,
     }
 }
