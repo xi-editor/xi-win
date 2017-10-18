@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Utilities for converting between Windows and Rust types, including strings.
+//! Various utilities for working with windows. Includes utilities for converting between Windows 
+//! and Rust types, including strings. 
+//! Also includes some code to dynamically load functions at runtime. This is needed for functions
+//! which are only supported on certain versions of windows.
 
 use std::ffi::{OsStr, CString};
 use std::os::windows::ffi::OsStrExt;
@@ -141,7 +144,6 @@ pub fn load_optional_functions() -> OptionalFunctions {
     let mut GetDpiForMonitor = None;
     let mut SetProcessDpiAwareness = None;
 
-    // TODO (seventh-chord, 15.10.17) somebody with win10 needs to test those which are marked "10"
     if shcore.is_null() {
         println!("No shcore.dll");
     } else {
