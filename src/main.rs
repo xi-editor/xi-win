@@ -20,8 +20,6 @@ extern crate winapi;
 extern crate user32;
 extern crate gdi32;
 extern crate kernel32;
-extern crate ole32;
-extern crate uuid;
 extern crate direct2d;
 extern crate directwrite;
 
@@ -37,6 +35,7 @@ mod linecache;
 mod menus;
 mod util;
 mod window;
+mod dialog;
 mod xi_thread;
 
 use std::cell::RefCell;
@@ -58,8 +57,9 @@ use serde_json::Value;
 use hwnd_rt::HwndRtParams;
 use linecache::LineCache;
 use menus::Menus;
-use util::{Error, FromWide, ToWide, OptionalFunctions};
+use util::{Error, ToWide, OptionalFunctions};
 use window::{create_window, WndProc};
+use dialog::{get_open_file_dialog_path, get_save_file_dialog_path};
 use xi_thread::{start_xi_thread, XiPeer};
 
 struct Resources {
@@ -89,6 +89,7 @@ struct MainWinState {
     dwrite_factory: directwrite::Factory,
     render_target: Option<RenderTarget>,
     resources: Option<Resources>,
+    filename: Option<String>,
 }
 
 impl MainWinState {
@@ -102,6 +103,7 @@ impl MainWinState {
             dwrite_factory: directwrite::Factory::new().unwrap(),
             render_target: None,
             resources: None,
+            filename: None
         }
     }
 
@@ -194,36 +196,31 @@ impl MainWin {
     }
 
     fn file_open(&self, hwnd_owner: HWND) {
-        unsafe {
-            let mut pfd: *mut IFileDialog = null_mut();
-            let hr = ole32::CoCreateInstance(&uuid::CLSID_FileOpenDialog,
-                null_mut(),
-                winapi::CLSCTX_INPROC_SERVER,
-                &uuid::IID_IFileOpenDialog,
-                &mut pfd as *mut *mut winapi::IFileDialog as *mut winapi::LPVOID
-                );
-            if hr != winapi::S_OK {
-                return;  // TODO: should be error result
-            }
-            (*pfd).Show(hwnd_owner);
-            let mut result: *mut winapi::IShellItem = null_mut();
-            (*pfd).GetResult(&mut result);
-            if !result.is_null() {
-                let mut display_name: LPWSTR = null_mut();
-                (*result).GetDisplayName(SIGDN_FILESYSPATH, &mut display_name);
-                if let Some(filename) = display_name.from_wide() {
-                    // Note: this whole protocol has changed a lot since the
-                    // 0.2 version of xi-core.
-                    self.send_edit_cmd("open", &json!({
-                        "filename": filename,
-                    }));
-                }
-                ole32::CoTaskMemFree(display_name as LPVOID);
-                (*result).Release();
-            } else {
-                //println!("result is null");
-            }
-            (*pfd).Release();
+        let filename = unsafe { get_open_file_dialog_path(hwnd_owner) };
+        if let Some(filename) = filename {
+            // TODO: Do not save here and pull from Xi core based on `self.state.view_id` instead?
+            self.state.borrow_mut().filename = Some(filename.clone());
+            // Note: this whole protocol has changed a lot since the
+            // 0.2 version of xi-core.
+            self.send_edit_cmd("open", &json!({
+                "filename": filename,
+            }));
+        }
+    }
+
+    // TODO: Split this into `save` and `save_as`
+    fn file_save(&self, hwnd_owner: HWND) {
+        // TODO: Make this work instead of crashing with 101 exit code
+        // let filename = &self.state.borrow().filename;
+        // if let &Some(ref filename) = filename {
+        //     self.send_edit_cmd("save", &json!({
+        //         "filename": filename,
+        //     }));
+        // } else
+        if let Some(filename) = unsafe { get_save_file_dialog_path(hwnd_owner) } {
+            self.send_edit_cmd("save", &json!({
+                "filename": filename,
+            }));
         }
     }
 }
@@ -334,6 +331,9 @@ impl WndProc for MainWin {
                     }
                     x if x == menus::MenuEntries::Open as WPARAM => {
                         self.file_open(hwnd);
+                    }
+                    x if x == menus::MenuEntries::Save as WPARAM => {
+                        self.file_save(hwnd);
                     }
                     _ => return Some(1),
                 }
