@@ -22,6 +22,8 @@ use serde_json::Value;
 use std::mem;
 use std::rc::Rc;
 
+use util::{ToWide};
+
 pub trait WndProc {
     fn window_proc(&self, hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM) -> Option<LRESULT>;
 
@@ -70,4 +72,20 @@ pub unsafe fn create_window(
     let hwnd = CreateWindowExW(dwExStyle, lpClassName, lpWindowName, dwStyle, x, y,
         nWidth, nHeight, hWndParent, hMenu, hInstance, Rc::into_raw(wndproc) as LPVOID);
     hwnd
+}
+
+// https://msdn.microsoft.com/en-us/library/windows/desktop/ms647995(v=vs.85).aspx
+// https://github.com/retep998/winapi-rs/blob/0.3/src/um/winuser.rs#L3718
+#[allow(non_snake_case)]
+pub unsafe fn set_menu(hWnd: HWND, hMenu: HMENU) -> HMENU {
+    SetMenu(hWnd, hMenu)
+}
+
+#[allow(non_snake_case)]
+#[allow(unused)]
+// https://msdn.microsoft.com/en-us/library/windows/desktop/ms645505(v=vs.85).aspx
+// https://github.com/retep998/winapi-rs/blob/0.3/src/um/winuser.rs#L4652
+pub unsafe fn message_box(hWnd: HWND, text: String) -> c_int {
+    let text = text.to_wide().as_ptr();
+    MessageBoxW(hWnd, text, "Xi".to_wide().as_ptr(), MB_OK)
 }

@@ -58,7 +58,7 @@ use hwnd_rt::HwndRtParams;
 use linecache::LineCache;
 use menus::Menus;
 use util::{Error, ToWide, OptionalFunctions};
-use window::{create_window, WndProc};
+use window::{create_window, set_menu, WndProc};
 use dialog::{get_open_file_dialog_path, get_save_file_dialog_path};
 use xi_thread::{start_xi_thread, XiPeer};
 
@@ -198,29 +198,44 @@ impl MainWin {
     fn file_open(&self, hwnd_owner: HWND) {
         let filename = unsafe { get_open_file_dialog_path(hwnd_owner) };
         if let Some(filename) = filename {
-            // TODO: Do not save here and pull from Xi core based on `self.state.view_id` instead?
             self.state.borrow_mut().filename = Some(filename.clone());
             // Note: this whole protocol has changed a lot since the
             // 0.2 version of xi-core.
             self.send_edit_cmd("open", &json!({
                 "filename": filename,
             }));
+
+            // Update menu to enable the Save item now that a file is open.
+            let menus = Menus::create(true);
+            let hmenu = menus.get_hmenubar();
+            unsafe { set_menu(hwnd_owner, hmenu); }
         }
     }
 
-    // TODO: Split this into `save` and `save_as`
     fn file_save(&self, hwnd_owner: HWND) {
-        // TODO: Make this work instead of crashing with 101 exit code
-        // let filename = &self.state.borrow().filename;
-        // if let &Some(ref filename) = filename {
-        //     self.send_edit_cmd("save", &json!({
-        //         "filename": filename,
-        //     }));
-        // } else
+        let filename: &Option<String> = &self.state.borrow_mut().filename;
+        if filename.is_none() {
+            self.file_save_as(hwnd_owner);
+        } else {
+            let filename: String = filename.clone().unwrap();
+            self.send_edit_cmd("save", &json!({
+                "filename": filename,
+            }));
+        }
+    }
+
+    fn file_save_as(&self, hwnd_owner: HWND) {
         if let Some(filename) = unsafe { get_save_file_dialog_path(hwnd_owner) } {
             self.send_edit_cmd("save", &json!({
                 "filename": filename,
             }));
+
+            self.state.borrow_mut().filename = Some(filename.clone());
+
+            // Update menu to enable the Save item now that a file is open.
+            let menus = Menus::create(true);
+            let hmenu = menus.get_hmenubar();
+            unsafe { set_menu(hwnd_owner, hmenu); }
         }
     }
 }
@@ -335,6 +350,9 @@ impl WndProc for MainWin {
                     x if x == menus::MenuEntries::Save as WPARAM => {
                         self.file_save(hwnd);
                     }
+                    x if x == menus::MenuEntries::SaveAs as WPARAM => {
+                        self.file_save_as(hwnd);
+                    }
                     _ => return Some(1),
                 }
                 Some(0)
@@ -397,7 +415,7 @@ fn create_main(optional_functions: &OptionalFunctions, xi_peer: XiPeer) -> Resul
         let width = (500.0 * (dpi/96.0)) as i32;
         let height = (400.0 * (dpi/96.0)) as i32;
 
-        let menus = Menus::create();
+        let menus = Menus::create(false);
         let hmenu = menus.get_hmenubar();
         let hwnd = create_window(winapi::WS_EX_OVERLAPPEDWINDOW, class_name.as_ptr(),
             class_name.as_ptr(), WS_OVERLAPPEDWINDOW | winapi::WS_VSCROLL,

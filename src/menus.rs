@@ -24,6 +24,7 @@ pub enum MenuEntries {
     Exit = 0x100,
     Open,
     Save,
+    SaveAs,
 }
 
 pub struct Menus {
@@ -32,13 +33,16 @@ pub struct Menus {
 
 impl Menus {
     // TODO: wire up accelerators corresponding to the advertised keyboard shortcuts.
-    pub fn create() -> Menus {
+    pub fn create(save_enabled: bool) -> Menus {
         unsafe {
             let hmenubar = CreateMenu();
             let hmenu = CreateMenu();
             AppendMenuW(hmenubar, MF_POPUP, hmenu as UINT_PTR, "&File".to_wide().as_ptr());
-            AppendMenuW(hmenu, MF_STRING, MenuEntries::Open as UINT_PTR, "&Open\tCtrl+O".to_wide().as_ptr());
-            AppendMenuW(hmenu, MF_STRING, MenuEntries::Save as UINT_PTR, "&Save\tCtrl+S".to_wide().as_ptr());
+            AppendMenuW(hmenu, MF_STRING, MenuEntries::Open as UINT_PTR, "&Open…\tCtrl+O".to_wide().as_ptr());
+            AppendMenuW(hmenu, if save_enabled { MF_STRING } else { MF_STRING | MF_DISABLED },
+                MenuEntries::Save as UINT_PTR, "&Save\tCtrl+S".to_wide().as_ptr());
+            AppendMenuW(hmenu, MF_STRING,
+                MenuEntries::SaveAs as UINT_PTR, "&Save as…".to_wide().as_ptr());
             AppendMenuW(hmenu, MF_STRING, MenuEntries::Exit as UINT_PTR, "E&xit".to_wide().as_ptr());
 
             let hmenu = CreateMenu();
