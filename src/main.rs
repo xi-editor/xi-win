@@ -208,11 +208,11 @@ impl MainWin {
     }
 
     fn file_save(&self, hwnd_owner: HWND) {
-        let filename: &Option<String> = &self.state.borrow_mut().filename;
+        let filename: Option<String> = self.state.borrow_mut().filename.clone();
         if filename.is_none() {
             self.file_save_as(hwnd_owner);
         } else {
-            let filename: String = filename.clone().unwrap();
+            let filename = filename.unwrap();
             self.send_edit_cmd("save", &json!({
                 "filename": filename,
             }));
