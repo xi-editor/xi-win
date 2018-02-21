@@ -74,13 +74,6 @@ pub unsafe fn create_window(
     hwnd
 }
 
-// https://msdn.microsoft.com/en-us/library/windows/desktop/ms647995(v=vs.85).aspx
-// https://github.com/retep998/winapi-rs/blob/0.3/src/um/winuser.rs#L3718
-#[allow(non_snake_case)]
-pub unsafe fn set_menu(hWnd: HWND, hMenu: HMENU) -> HMENU {
-    SetMenu(hWnd, hMenu)
-}
-
 #[allow(non_snake_case)]
 #[allow(unused)]
 // https://msdn.microsoft.com/en-us/library/windows/desktop/ms645505(v=vs.85).aspx

@@ -58,7 +58,7 @@ use hwnd_rt::HwndRtParams;
 use linecache::LineCache;
 use menus::Menus;
 use util::{Error, ToWide, OptionalFunctions};
-use window::{create_window, set_menu, WndProc};
+use window::{create_window, WndProc};
 use dialog::{get_open_file_dialog_path, get_save_file_dialog_path};
 use xi_thread::{start_xi_thread, XiPeer};
 
@@ -204,11 +204,6 @@ impl MainWin {
             self.send_edit_cmd("open", &json!({
                 "filename": filename,
             }));
-
-            // Update menu to enable the Save item now that a file is open.
-            let menus = Menus::create(true);
-            let hmenu = menus.get_hmenubar();
-            unsafe { set_menu(hwnd_owner, hmenu); }
         }
     }
 
@@ -231,11 +226,6 @@ impl MainWin {
             }));
 
             self.state.borrow_mut().filename = Some(filename.clone());
-
-            // Update menu to enable the Save item now that a file is open.
-            let menus = Menus::create(true);
-            let hmenu = menus.get_hmenubar();
-            unsafe { set_menu(hwnd_owner, hmenu); }
         }
     }
 }
@@ -415,7 +405,7 @@ fn create_main(optional_functions: &OptionalFunctions, xi_peer: XiPeer) -> Resul
         let width = (500.0 * (dpi/96.0)) as i32;
         let height = (400.0 * (dpi/96.0)) as i32;
 
-        let menus = Menus::create(false);
+        let menus = Menus::create();
         let hmenu = menus.get_hmenubar();
         let hwnd = create_window(winapi::WS_EX_OVERLAPPEDWINDOW, class_name.as_ptr(),
             class_name.as_ptr(), WS_OVERLAPPEDWINDOW | winapi::WS_VSCROLL,

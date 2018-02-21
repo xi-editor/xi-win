@@ -5,17 +5,6 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "(Windows) LLDB",
-      "type": "lldb",
-      "request": "launch",
-      "program": "${workspaceRoot}/target/debug/xi-win.exe",
-      "args": [],
-      "cwd": "${workspaceRoot}",
-      "sourceLanguages": [
-        "rust"
-      ]
-    },
-    {
       "name": "(Windows) MSVC",
       "type": "cppvsdbg",
       "request": "launch",
