@@ -20,7 +20,12 @@
 
 use std::ptr::null_mut;
 
-use winapi::*;
+use winapi::um::d2d1::*;
+use winapi::um::d2d1_1::*;
+use winapi::um::dcommon::*;
+use winapi::shared::dxgiformat::*;
+use winapi::shared::windef::*;
+use winapi::shared::winerror::*;
 
 use direct2d::render_target::RenderTargetBacking;
 
@@ -31,7 +36,7 @@ pub struct HwndRtParams {
 }
 
 unsafe impl RenderTargetBacking for HwndRtParams {
-    fn create_target(self, factory: &mut ID2D1Factory) -> Result<*mut ID2D1RenderTarget, HRESULT> {
+    fn create_target(self, factory: &mut ID2D1Factory1) -> Result<*mut ID2D1RenderTarget, HRESULT> {
         unsafe {
             let mut ptr: *mut ID2D1HwndRenderTarget = null_mut();
             let props = D2D1_RENDER_TARGET_PROPERTIES {

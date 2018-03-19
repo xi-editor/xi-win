@@ -14,8 +14,9 @@
 
 //! Configuration and runtime for the main window's menus.
 
-use user32::*;
-use winapi::*;
+use winapi::shared::basetsd::*;
+use winapi::shared::windef::*;
+use winapi::um::winuser::*;
 
 use util::ToWide;
 

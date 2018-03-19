@@ -22,8 +22,8 @@ use std::thread;
 #[allow(unused_imports)]
 use std::time::Duration;
 
-use kernel32::{CreateSemaphoreW, ReleaseSemaphore};
-use winapi::HANDLE;
+use winapi::um::synchapi::{CreateSemaphoreW, ReleaseSemaphore};
+use winapi::shared::ntdef::HANDLE;
 
 use serde_json::{self, Value};
 

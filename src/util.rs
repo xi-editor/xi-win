@@ -22,8 +22,13 @@ use std::os::windows::ffi::OsStrExt;
 use std::slice;
 use std::mem;
 
-use winapi::{HRESULT, LPWSTR, UINT, HMODULE, HMONITOR, MONITOR_DPI_TYPE, PROCESS_DPI_AWARENESS};
-use kernel32::{LoadLibraryW, GetModuleHandleW, GetProcAddress};
+//use winapi::{HRESULT, LPWSTR, UINT, HMODULE, HMONITOR, MONITOR_DPI_TYPE, PROCESS_DPI_AWARENESS};
+//use kernel32::{LoadLibraryW, GetModuleHandleW, GetProcAddress};
+use winapi::shared::minwindef::*;
+use winapi::shared::ntdef::*;
+use winapi::shared::windef::*;
+use winapi::um::libloaderapi::*;
+use winapi::um::shellscalingapi::*;
 
 #[derive(Debug)]
 pub enum Error {

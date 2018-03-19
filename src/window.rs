@@ -14,8 +14,12 @@
 
 //! Plumbing to dispatch windows messages to a dynamic trait object.
 
-use winapi::*;
-use user32::*;
+use winapi::ctypes::c_int;
+use winapi::shared::basetsd::LONG_PTR;
+use winapi::shared::minwindef::*;
+use winapi::shared::windef::*;
+use winapi::um::winuser::*;
+use winapi::um::winnt::LPCWSTR;
 
 use serde_json::Value;
 
