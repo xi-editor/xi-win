@@ -27,31 +27,21 @@ extern crate serde_json;
 
 extern crate xi_core_lib;
 extern crate xi_rpc;
+extern crate xi_win_shell;
 
-mod hwnd_rt;
 mod linecache;
 mod menus;
-mod util;
-mod window;
 mod dialog;
 mod xi_thread;
 
 use std::cell::RefCell;
-use std::mem;
-use std::ptr::null_mut;
 use std::sync::mpsc::TryRecvError;
 use std::rc::Rc;
 
-use winapi::shared::minwindef::*;
-use winapi::shared::ntdef::LPCWSTR;
 use winapi::shared::windef::*;
-use winapi::um::d2d1::*;
-use winapi::um::shellscalingapi::*;
-use winapi::um::winbase::*;
-use winapi::um::wingdi::*;
 use winapi::um::winuser::*;
 
-use direct2d::{RenderTarget, brush};
+use direct2d::brush;
 use direct2d::math::*;
 use direct2d::render_target::DrawTextOption;
 use directwrite::text_format::{self, TextFormat};
@@ -59,13 +49,15 @@ use directwrite::text_layout::{self, TextLayout};
 
 use serde_json::Value;
 
-use hwnd_rt::HwndRtParams;
 use linecache::LineCache;
-use menus::Menus;
-use util::{Error, ToWide, OptionalFunctions};
-use window::{create_window, WndProc};
+use menus::MenuEntries;
+use xi_win_shell::util::Error;
 use dialog::{get_open_file_dialog_path, get_save_file_dialog_path};
 use xi_thread::{start_xi_thread, XiPeer};
+
+use xi_win_shell::paint::PaintCtx;
+use xi_win_shell::win_main;
+use xi_win_shell::window::{WindowBuilder, WindowHandle, WinHandler};
 
 struct Resources {
     fg: brush::SolidColor,
@@ -89,10 +81,7 @@ struct MainWinState {
     view_id: String,
     line_cache: LineCache,
     label: String,
-    self_hwnd: HWND,
-    d2d_factory: direct2d::Factory,
     dwrite_factory: directwrite::Factory,
-    render_target: Option<RenderTarget>,
     resources: Option<Resources>,
     filename: Option<String>,
 }
@@ -103,17 +92,14 @@ impl MainWinState {
             view_id: String::new(),
             line_cache: LineCache::new(),
             label: "hello direct2d".to_string(),
-            self_hwnd: null_mut(),
-            d2d_factory: direct2d::Factory::new().unwrap(),
             dwrite_factory: directwrite::Factory::new().unwrap(),
-            render_target: None,
             resources: None,
             filename: None
         }
     }
 
-    fn create_resources(&mut self) -> Resources {
-        let rt = self.render_target.as_mut().unwrap();
+    fn create_resources(&mut self, p: &mut PaintCtx) -> Resources {
+        let rt = p.render_target();
         let text_format_params = text_format::ParamBuilder::new()
             .size(15.0)
             .family("Consolas")
@@ -126,50 +112,49 @@ impl MainWinState {
         }
     }
 
-    fn render(&mut self) {
-        let res = {
-            if self.resources.is_none() {
-                self.resources = Some(self.create_resources());
-            }
-            let resources = &self.resources.as_ref().unwrap();
-            let rt = self.render_target.as_mut().unwrap();
-            rt.begin_draw();
-            let size = rt.get_size();
-            let rect = RectF::from((0.0, 0.0, size.width, size.height));
-            rt.fill_rectangle(&rect, &resources.bg);
+    fn render(&mut self, p: &mut PaintCtx) {
+        if self.resources.is_none() {
+            self.resources = Some(self.create_resources(p));
+        }
+        let resources = &self.resources.as_ref().unwrap();
+        let rt = p.render_target();
+        let size = rt.get_size();
+        let rect = RectF::from((0.0, 0.0, size.width, size.height));
+        rt.fill_rectangle(&rect, &resources.bg);
 
-            let x0 = 6.0;
-            let mut y = 6.0;
-            for line_num in 0..self.line_cache.height() {
-                if let Some(line) = self.line_cache.get_line(line_num) {
-                    let layout = resources.create_text_layout(&self.dwrite_factory, line.text());
-                    rt.draw_text_layout(
-                        &Point2F::from((x0, y)),
-                        &layout,
-                        &resources.fg,
-                        &[DrawTextOption::EnableColorFont]
-                    );
-                    for &offset in line.cursor() {
-                        if let Some(pos) = layout.hit_test_text_position(offset as u32, true) {
-                            let x = x0 + pos.point_x;
-                            rt.draw_line(&Point2F::from((x, y)),
-                                &Point2F::from((x, y + 17.0)),
-                                &resources.fg, 1.0, None);
-                        }
+        let x0 = 6.0;
+        let mut y = 6.0;
+        for line_num in 0..self.line_cache.height() {
+            if let Some(line) = self.line_cache.get_line(line_num) {
+                let layout = resources.create_text_layout(&self.dwrite_factory, line.text());
+                rt.draw_text_layout(
+                    &Point2F::from((x0, y)),
+                    &layout,
+                    &resources.fg,
+                    &[DrawTextOption::EnableColorFont]
+                );
+                for &offset in line.cursor() {
+                    if let Some(pos) = layout.hit_test_text_position(offset as u32, true) {
+                        let x = x0 + pos.point_x;
+                        rt.draw_line(&Point2F::from((x, y)),
+                            &Point2F::from((x, y + 17.0)),
+                            &resources.fg, 1.0, None);
                     }
                 }
-                y += 17.0;
             }
-            rt.end_draw()
-        };
-        if res.is_err() {
-            self.render_target = None;
+            y += 17.0;
         }
     }
 }
 
+struct MainWinHandler {
+    win: Rc<MainWin>,
+}
+
+// Maybe combine all this, put as a single item inside a RefCell.
 struct MainWin {
     peer: XiPeer,
+    handle: RefCell<WindowHandle>,
     state: RefCell<MainWinState>,
 }
 
@@ -177,7 +162,8 @@ impl MainWin {
     fn new(peer: XiPeer, state: MainWinState) -> MainWin {
         MainWin {
             peer: peer,
-            state: RefCell::new(state)
+            handle: Default::default(),
+            state: RefCell::new(state),
         }
     }
 
@@ -235,127 +221,88 @@ impl MainWin {
     }
 }
 
-impl WndProc for MainWin {
-    fn window_proc(&self, hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM) -> Option<LRESULT> {
-        //println!("{:x} {:x} {:x}", msg, wparam, lparam);
-        match msg {
-            WM_CREATE => {
-                self.state.borrow_mut().self_hwnd = hwnd;
-                let cmd = json!({
-                    "method": "new_tab",
-                    "params": [],
-                    "id": 0
-                });
-                self.peer.send_json(&cmd);
-                None
+impl WinHandler for MainWinHandler {
+    fn connect(&self, handle: &WindowHandle) {
+        *self.win.handle.borrow_mut() = handle.clone();
+        let cmd = json!({
+            "method": "new_tab",
+            "params": [],
+            "id": 0
+        });
+        self.win.peer.send_json(&cmd);
+    }
+
+    fn paint(&self, paint_ctx: &mut PaintCtx) {
+        let mut state = self.win.state.borrow_mut();
+        state.render(paint_ctx);
+    }
+
+    fn command(&self, id: u32) {
+        match id {
+            x if x == MenuEntries::Exit as u32 => {
+                self.win.handle.borrow().close();
             }
-            WM_DESTROY => unsafe {
-                self.state.borrow_mut().self_hwnd = null_mut();
-                PostQuitMessage(0);
-                None
-            },
-            WM_PAINT => unsafe {
-                let mut state = self.state.borrow_mut();
-                if state.render_target.is_none() {
-                    let mut rect: RECT = mem::uninitialized();
-                    GetClientRect(hwnd, &mut rect);
-                    //println!("rect={:?}", rect);
-                    let width = (rect.right - rect.left) as u32;
-                    let height = (rect.bottom - rect.top) as u32;
-                    let params = HwndRtParams { hwnd: hwnd, width: width, height: height };
-                    state.render_target = state.d2d_factory.create_render_target(params).ok();
-                }
-                state.render();
-                ValidateRect(hwnd, null_mut());
-                Some(0)
-            },
-            WM_SIZE => unsafe {
-                let mut state = self.state.borrow_mut();
-                state.render_target.as_mut().and_then(|rt|
-                    rt.hwnd_rt().map(|hrt|
-                        hrt.Resize(&D2D1_SIZE_U {
-                            width: LOWORD(lparam as u32) as u32,
-                            height: HIWORD(lparam as u32) as u32,
-                        })
-                    )
-                );
-                None
-            },
-            WM_CHAR => {
-                // let paramsString = format!("{:x} {:x} {:x}\n", msg, wparam, lparam);
-                // let params = json!({"chars": paramsString});
-                // self.send_edit_cmd("insert", &params);
-                // println!("WM_CHAR {:x} {:x}", wparam, lparam);
-                match wparam as i32 {
-                    VK_BACK => {
-                        self.send_edit_cmd("delete_backward", &json!([]));
-                        Some(0)
-                    },
-                    VK_RETURN => {
-                        self.send_edit_cmd("insert_newline", &json!([]));
-                        Some(0)
-                    },
-                    _ => {
-                        if let Some(c) = ::std::char::from_u32(wparam as u32) {
-                            let params = json!({"chars": c.to_string()});
-                            self.send_edit_cmd("insert", &params);
-                            return Some(0)
-                        }
-                        None
-                    }
-                }
+            x if x == MenuEntries::Open as u32 => {
+                let hwnd = self.win.handle.borrow().get_hwnd().unwrap();
+                self.win.file_open(hwnd);
             }
-            WM_KEYDOWN => {
-                // Handle special keys here
-                match wparam as i32 {
-                    VK_UP => {
-                        self.send_edit_cmd("move_up", &json!([]));
-                        Some(0)
-                    },
-                    VK_DOWN => {
-                        self.send_edit_cmd("move_down", &json!([]));
-                        Some(0)
-                    },
-                    VK_LEFT => {
-                        self.send_edit_cmd("move_left", &json!([]));
-                        Some(0)
-                    },
-                    VK_RIGHT => {
-                        self.send_edit_cmd("move_right", &json!([]));
-                        Some(0)
-                    },
-                    VK_DELETE => {
-                        self.send_edit_cmd("delete_forward", &json!([]));
-                        Some(0)
-                    },
-                    _ => None
-                }
-            },
-            WM_LBUTTONDOWN => {
-                Some(0)
-            },
-            WM_COMMAND => unsafe {
-                match wparam {
-                    x if x == menus::MenuEntries::Exit as WPARAM => {
-                        DestroyWindow(hwnd);
-                    }
-                    x if x == menus::MenuEntries::Open as WPARAM => {
-                        self.file_open(hwnd);
-                    }
-                    x if x == menus::MenuEntries::Save as WPARAM => {
-                        self.file_save(hwnd);
-                    }
-                    x if x == menus::MenuEntries::SaveAs as WPARAM => {
-                        self.file_save_as(hwnd);
-                    }
-                    _ => return Some(1),
-                }
-                Some(0)
-            },
-            _ => None
+            x if x == MenuEntries::Save as u32 => {
+                let hwnd = self.win.handle.borrow().get_hwnd().unwrap();
+                self.win.file_save(hwnd);
+            }
+            x if x == MenuEntries::SaveAs as u32 => {
+                let hwnd = self.win.handle.borrow().get_hwnd().unwrap();
+                self.win.file_save_as(hwnd);
+            }
+            _ => println!("unexpected id {}", id),
         }
     }
 
+    fn char(&self, ch: u32) {
+        match ch {
+            0x08 => {
+                self.win.send_edit_cmd("delete_backward", &json!([]));
+            },
+            0x0d => {
+                self.win.send_edit_cmd("insert_newline", &json!([]));
+            },
+            _ => {
+                if let Some(c) = ::std::char::from_u32(ch) {
+                    let params = json!({"chars": c.to_string()});
+                    self.win.send_edit_cmd("insert", &params);
+                }
+            }
+        }
+    }
+
+    fn keydown(&self, vk_code: i32) {
+        // Handle special keys here
+        match vk_code {
+            VK_UP => {
+                self.win.send_edit_cmd("move_up", &json!([]));
+            },
+            VK_DOWN => {
+                self.win.send_edit_cmd("move_down", &json!([]));
+            },
+            VK_LEFT => {
+                self.win.send_edit_cmd("move_left", &json!([]));
+            },
+            VK_RIGHT => {
+                self.win.send_edit_cmd("move_right", &json!([]));
+            },
+            VK_DELETE => {
+                self.win.send_edit_cmd("delete_forward", &json!([]));
+            },
+            _ => ()
+        }
+    }
+
+    fn destroy(&self) {
+        win_main::request_quit();
+    }
+}
+
+impl MainWin {
     fn handle_cmd(&self, v: &Value) {
         let mut state = self.state.borrow_mut();
         //println!("got {:?}", v);
@@ -369,110 +316,46 @@ impl WndProc for MainWin {
             }
         }
         state.label = serde_json::to_string(v).unwrap();
-        unsafe { InvalidateRect(state.self_hwnd, null_mut(), 0); }
+        self.handle.borrow().invalidate();
     }
 }
 
-fn create_main(optional_functions: &OptionalFunctions, xi_peer: XiPeer) -> Result<(HWND, Rc<Box<WndProc>>), Error> {
-    unsafe {
-        let class_name = "Xi Editor".to_wide();
-        let icon = LoadIconW(0 as HINSTANCE, IDI_APPLICATION);
-        let cursor = LoadCursorW(0 as HINSTANCE, IDC_IBEAM);
-        let brush = CreateSolidBrush(0xffffff);
-        let wnd = WNDCLASSW {
-            style: 0,
-            lpfnWndProc: Some(window::win_proc_dispatch),
-            cbClsExtra: 0,
-            cbWndExtra: 0,
-            hInstance: 0 as HINSTANCE,
-            hIcon: icon,
-            hCursor: cursor,
-            hbrBackground: brush,
-            lpszMenuName: 0 as LPCWSTR,
-            lpszClassName: class_name.as_ptr(),
-        };
-        let class_atom = RegisterClassW(&wnd);
-        if class_atom == 0 {
-            return Err(Error::Null);
-        }
-        let main_state = MainWinState::new();
-        let main_win: Rc<Box<WndProc>> = Rc::new(Box::new(
-            MainWin::new(xi_peer, main_state)));
+fn create_main(xi_peer: XiPeer) -> Result<(WindowHandle, Rc<MainWin>), Error> {
+    let main_state = MainWinState::new();
+    let main_win = Rc::new(MainWin::new(xi_peer, main_state));
+    let main_win_handler = MainWinHandler {
+        win: main_win.clone(),
+    };
 
-        // Simple scaling based on System Dpi (96 is equivalent to 100%)
-        let dpi = if let Some(func) = optional_functions.GetDpiForSystem {
-            // Only supported on windows 10
-            func() as f32
-        } else {
-            // TODO GetDpiForMonitor is supported on windows 8.1, try falling back to that here
-            96.0
-        };
-        let width = (500.0 * (dpi/96.0)) as i32;
-        let height = (400.0 * (dpi/96.0)) as i32;
+    let menubar = menus::create_menus();
 
-        let menus = Menus::create();
-        let hmenu = menus.get_hmenubar();
-        let hwnd = create_window(WS_EX_OVERLAPPEDWINDOW, class_name.as_ptr(),
-            class_name.as_ptr(), WS_OVERLAPPEDWINDOW | WS_VSCROLL,
-            CW_USEDEFAULT, CW_USEDEFAULT, width, height, 0 as HWND, hmenu, 0 as HINSTANCE,
-            main_win.clone());
-        if hwnd.is_null() {
-            return Err(Error::Null);
-        }
-        Ok((hwnd, main_win))
-    }
+    let mut builder = WindowBuilder::new();
+    builder.set_handler(Box::new(main_win_handler));
+    builder.set_title("xi-editor");
+    builder.set_menu(menubar);
+    let window = builder.build().unwrap();
+    Ok((window, main_win))
 }
 
 fn main() {
-    let optional_functions = util::load_optional_functions();
+    xi_win_shell::init();
 
+    let (xi_peer, rx, semaphore) = start_xi_thread();
+
+    let (window, main_win) = create_main(xi_peer).unwrap();
+    window.show();
+    let mut run_loop = win_main::RunLoop::new();
+    let run_handle = run_loop.get_handle();
     unsafe {
-        if let Some(func) = optional_functions.SetProcessDpiAwareness {
-            // This function is only supported on windows 10
-            func(PROCESS_SYSTEM_DPI_AWARE); // TODO: per monitor (much harder)
-        }
-
-        let (xi_peer, rx, semaphore) = start_xi_thread();
-        let (hwnd, main_win) = create_main(&optional_functions, xi_peer).unwrap();
-        ShowWindow(hwnd, SW_SHOWNORMAL);
-        UpdateWindow(hwnd);
-
-        loop {
-            let handles = [semaphore.get_handle()];
-            let _res = MsgWaitForMultipleObjectsEx(
-                handles.len() as u32,
-                handles.as_ptr(),
-                INFINITE,
-                QS_ALLEVENTS,
-                0
-            );
-
-            // Handle windows messages
-            loop {
-                let mut msg = mem::uninitialized();
-                let res = PeekMessageW(&mut msg, null_mut(), 0, 0, PM_NOREMOVE);
-                if res == 0 {
-                    break;
+        run_handle.add_handler(semaphore.get_handle(), move || {
+            match rx.try_recv() {
+                Ok(v) => main_win.handle_cmd(&v),
+                Err(TryRecvError::Disconnected) => {
+                    println!("core disconnected");
                 }
-                let res = GetMessageW(&mut msg, null_mut(), 0, 0);
-                if res <= 0 {
-                    return;
-                }
-                TranslateMessage(&mut msg);
-                DispatchMessageW(&mut msg);
+                Err(TryRecvError::Empty) => (),
             }
-
-            // Handle xi events
-            loop {
-                match rx.try_recv() {
-                    Ok(v) => main_win.handle_cmd(&v),
-                    Err(TryRecvError::Disconnected) => {
-                        println!("core disconnected");
-                        break;
-                    }
-                    Err(TryRecvError::Empty) => break,
-                }
-            }
-        }
+        });
     }
+    run_loop.run();
 }

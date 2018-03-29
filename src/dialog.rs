@@ -11,7 +11,7 @@ use winapi::um::shobjidl::*;
 use winapi::um::shobjidl_core::*;
 
 use std::ptr::null_mut;
-use util::{FromWide};
+use xi_win_shell::util::FromWide;
 
 pub unsafe fn get_open_file_dialog_path(hwnd_owner: HWND) -> Option<String> {
   get_file_dialog_path(hwnd_owner, true)
