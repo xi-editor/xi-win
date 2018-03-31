@@ -14,7 +14,12 @@
 
 //! The main module for the xi editor front end.
 
-#![windows_subsystem = "windows"] // NOTE: This disables stdout, so no println :(
+
+// NOTE: This disables stdout, so no println :(
+// TODO: If we checked what GetStdHandle returns for stdout and see
+// that it is an invalid handle (either -1 or 0), then we can open up
+// up a file to log stdout and SetStdHandle.
+#![windows_subsystem = "windows"]
 
 #[macro_use]
 extern crate winapi;
