@@ -22,8 +22,6 @@ use std::os::windows::ffi::OsStrExt;
 use std::slice;
 use std::mem;
 
-//use winapi::{HRESULT, LPWSTR, UINT, HMODULE, HMONITOR, MONITOR_DPI_TYPE, PROCESS_DPI_AWARENESS};
-//use kernel32::{LoadLibraryW, GetModuleHandleW, GetProcAddress};
 use winapi::shared::minwindef::*;
 use winapi::shared::ntdef::*;
 use winapi::shared::windef::*;
@@ -31,9 +29,13 @@ use winapi::um::libloaderapi::*;
 use winapi::um::shellscalingapi::*;
 
 #[derive(Debug)]
+/// Error codes. At the moment, this is little more than HRESULT, but that
+/// might change.
 pub enum Error {
     Null,
     Hr(HRESULT),
+    // Maybe include the full error from the direct2d crate.
+    D2Error,
 }
 
 /*
@@ -102,7 +104,7 @@ pub struct OptionalFunctions {
 }
 
 #[allow(non_snake_case)] // For local variables
-pub fn load_optional_functions() -> OptionalFunctions { 
+fn load_optional_functions() -> OptionalFunctions { 
     // Tries to load $function from $lib. $function should be one of the types defined just before 
     // `load_optional_functions`. This sets the corresponding local field to `Some(function pointer)`
     // if it manages to load the function.
@@ -166,5 +168,19 @@ pub fn load_optional_functions() -> OptionalFunctions {
         GetDpiForSystem,
         GetDpiForMonitor,
         SetProcessDpiAwareness,
+    }
+}
+
+lazy_static! {
+    pub static ref OPTIONAL_FUNCTIONS: OptionalFunctions = load_optional_functions();
+}
+
+/// Initialize the app. At the moment, this is mostly needed for hi-dpi.
+pub fn init() {
+    if let Some(func) = OPTIONAL_FUNCTIONS.SetProcessDpiAwareness {
+        // This function is only supported on windows 10
+        unsafe {
+            func(PROCESS_SYSTEM_DPI_AWARE); // TODO: per monitor (much harder)
+        }
     }
 }

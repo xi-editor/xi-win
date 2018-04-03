@@ -1,21 +1,15 @@
 [package]
-name = "xi-win"
-version = "0.1.1"
+name = "xi-win-shell"
+version = "0.1.0"
 license = "Apache-2.0"
 authors = ["Raph Levien <raph@google.com>"]
-description = "Windows front-end for xi editor."
+description = "Windows-specific application shell used for xi editor."
 
 [dependencies]
 directwrite = "0.0.9"
 direct2d = "0.0.9"
 
-xi-core-lib = "0.2"
-xi-rpc = "0.2"
-serde = "1.0"
-serde_json = "1.0"
-
-[dependencies.xi-win-shell]
-path = "xi-win-shell"
+lazy_static = "1.0"
 
 [dependencies.winapi]
 version = "0.3"

@@ -14,11 +14,7 @@
 
 //! Configuration and runtime for the main window's menus.
 
-use winapi::shared::basetsd::*;
-use winapi::shared::windef::*;
-use winapi::um::winuser::*;
-
-use util::ToWide;
+use xi_win_shell::menu::Menu;
 
 #[repr(u32)]
 pub enum MenuEntries {
@@ -28,32 +24,15 @@ pub enum MenuEntries {
     SaveAs,
 }
 
-pub struct Menus {
-    hmenubar: HMENU,
-}
-
-impl Menus {
-    // TODO: wire up accelerators corresponding to the advertised keyboard shortcuts.
-    pub fn create() -> Menus {
-        unsafe {
-            let hmenubar = CreateMenu();
-            let hmenu = CreateMenu();
-            AppendMenuW(hmenubar, MF_POPUP, hmenu as UINT_PTR, "&File".to_wide().as_ptr());
-            AppendMenuW(hmenu, MF_STRING, MenuEntries::Open as UINT_PTR, "&Open…\tCtrl+O".to_wide().as_ptr());
-            AppendMenuW(hmenu, MF_STRING, MenuEntries::Save as UINT_PTR, "&Save\tCtrl+S".to_wide().as_ptr());
-            AppendMenuW(hmenu, MF_STRING, MenuEntries::SaveAs as UINT_PTR, "&Save as…".to_wide().as_ptr());
-            AppendMenuW(hmenu, MF_STRING, MenuEntries::Exit as UINT_PTR, "E&xit".to_wide().as_ptr());
-
-            let hmenu = CreateMenu();
-            AppendMenuW(hmenubar, MF_POPUP, hmenu as UINT_PTR, "&Edit".to_wide().as_ptr());
-
-            Menus {
-                hmenubar: hmenubar,
-            }
-        }
-    }
-
-    pub fn get_hmenubar(&self) -> HMENU {
-        self.hmenubar
-    }
+pub fn create_menus() -> Menu {
+    let mut file_menu = Menu::new();
+    file_menu.add_item(MenuEntries::Open as u32, "&Open…\tCtrl+O");
+    file_menu.add_item(MenuEntries::Save as u32, "&Save\tCtrl+S");
+    file_menu.add_item(MenuEntries::SaveAs as u32, "&Save as…");
+    file_menu.add_item(MenuEntries::Exit as u32, "E&xit");
+    let mut menubar = Menu::new();
+    menubar.add_dropdown(file_menu, "&File");
+    let edit_menu = Menu::new();
+    menubar.add_dropdown(edit_menu, "&Edit");
+    menubar
 }

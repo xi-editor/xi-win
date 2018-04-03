@@ -1,4 +1,4 @@
-// Copyright 2017 Google Inc. All rights reserved.
+// Copyright 2018 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,11 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Build script for main executable. Currently used to link in extra
-//! libraries, but will be extended to include manifest, icons, and
-//! other resources.
+//! Windows-specific application shell used for xi editor.
 
-extern crate build;
-fn main() {
-    build::link("shcore", true)
-}
+extern crate winapi;
+extern crate direct2d;
+#[macro_use]
+extern crate lazy_static;
+
+pub mod menu;
+pub mod paint;
+pub mod util;
+pub mod win_main;
+pub mod window;
+
+pub use util::Error;
+
+pub use util::init;
