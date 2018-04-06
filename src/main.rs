@@ -83,6 +83,7 @@ impl Resources {
 }
 
 struct MainWinState {
+    rpc_id: usize,
     view_id: String,
     line_cache: LineCache,
     label: String,
@@ -94,6 +95,7 @@ struct MainWinState {
 impl MainWinState {
     fn new() -> MainWinState {
         MainWinState {
+            rpc_id: 0,
             view_id: String::new(),
             line_cache: LineCache::new(),
             label: "hello direct2d".to_string(),
@@ -186,7 +188,7 @@ impl MainWin {
         let edit_params = json!({
             "method": method,
             "params": params,
-            "tab": view_id,
+            "view_id": view_id,
         });
         self.send_notification("edit", &edit_params);
     }
@@ -194,12 +196,10 @@ impl MainWin {
     fn file_open(&self, hwnd_owner: HWND) {
         let filename = unsafe { get_open_file_dialog_path(hwnd_owner) };
         if let Some(filename) = filename {
-            self.state.borrow_mut().filename = Some(filename.clone());
-            // Note: this whole protocol has changed a lot since the
-            // 0.2 version of xi-core.
-            self.send_edit_cmd("open", &json!({
-                "filename": filename,
-            }));
+            self.req_new_view(Some(&filename));
+            let mut state = self.state.borrow_mut();
+            state.filename = Some(filename);
+            state.line_cache = LineCache::new();
         }
     }
 
@@ -208,33 +208,46 @@ impl MainWin {
         if filename.is_none() {
             self.file_save_as(hwnd_owner);
         } else {
-            let filename = filename.unwrap();
-            self.send_edit_cmd("save", &json!({
-                "filename": filename,
+            let state = self.state.borrow_mut();
+            self.send_notification("save", &json!({
+                "view_id": state.view_id,
+                "file_path": filename,
             }));
         }
     }
 
     fn file_save_as(&self, hwnd_owner: HWND) {
         if let Some(filename) = unsafe { get_save_file_dialog_path(hwnd_owner) } {
-            self.send_edit_cmd("save", &json!({
-                "filename": filename,
+            let mut state = self.state.borrow_mut();
+            self.send_notification("save", &json!({
+                "view_id": state.view_id,
+                "file_path": filename,
             }));
 
-            self.state.borrow_mut().filename = Some(filename.clone());
+            state.filename = Some(filename.clone());
         }
+    }
+
+    fn req_new_view(&self, filename: Option<&str>) {
+        let mut params = json!({});
+        if let Some(filename) = filename {
+            params["file_path"] = json!(filename);
+        }
+        let cmd = json!({
+            "method": "new_view",
+            "params": params,
+            "id": self.state.borrow().rpc_id,
+        });
+        self.state.borrow_mut().rpc_id += 1;
+        self.peer.send_json(&cmd);
     }
 }
 
 impl WinHandler for MainWinHandler {
     fn connect(&self, handle: &WindowHandle) {
         *self.win.handle.borrow_mut() = handle.clone();
-        let cmd = json!({
-            "method": "new_tab",
-            "params": [],
-            "id": 0
-        });
-        self.win.peer.send_json(&cmd);
+        self.win.send_notification("client_started", &json!({}));
+        self.win.req_new_view(None);
     }
 
     fn paint(&self, paint_ctx: &mut PaintCtx) {

@@ -14,6 +14,8 @@
 
 //! The line cache (text, styles and cursors for a view).
 
+use std::mem;
+
 use serde_json::Value;
 
 pub struct Line {
@@ -54,18 +56,37 @@ impl LineCache {
         }
     }
 
+    fn push_opt_line(&mut self, line: Option<Line>) {
+        self.lines.push(line);
+    }
+
     pub fn apply_update(&mut self, update: &Value) {
-        let mut lines = Vec::new();
+        let old_cache = mem::replace(self, LineCache::new());
+        let mut old_iter = old_cache.lines.into_iter();
         for op in update["ops"].as_array().unwrap() {
-            //println!("op: {:?}", op);
             let op_type = &op["op"];
             if op_type == "ins" {
                 for line in op["lines"].as_array().unwrap() {
-                    lines.push(Some(Line::from_json(line)));
+                    let line = Line::from_json(line);
+                    self.push_opt_line(Some(line));
+                }
+            } else if op_type == "copy" {
+                let n = op["n"].as_u64().unwrap();
+                for _ in 0..n {
+                    self.push_opt_line(old_iter.next().unwrap_or_default());
+                }
+            } else if op_type == "skip" {
+                let n = op["n"].as_u64().unwrap();
+                for _ in 0..n {
+                    let _ = old_iter.next();
+                }
+            } else if op_type == "inval" {
+                let n = op["n"].as_u64().unwrap();
+                for _ in 0..n {
+                    self.push_opt_line(None);
                 }
             }
         }
-        self.lines = lines;
     }
 
     pub fn height(&self) -> usize {
