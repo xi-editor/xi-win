@@ -61,7 +61,7 @@ use dialog::{get_open_file_dialog_path, get_save_file_dialog_path};
 use xi_thread::{start_xi_thread, XiPeer};
 
 use xi_win_shell::paint::PaintCtx;
-use xi_win_shell::win_main;
+use xi_win_shell::win_main::{self, RunLoopHandle};
 use xi_win_shell::window::{WindowBuilder, WindowHandle, WinHandler};
 
 struct Resources {
@@ -250,9 +250,10 @@ impl WinHandler for MainWinHandler {
         self.win.req_new_view(None);
     }
 
-    fn paint(&self, paint_ctx: &mut PaintCtx) {
+    fn paint(&self, paint_ctx: &mut PaintCtx) -> bool {
         let mut state = self.win.state.borrow_mut();
         state.render(paint_ctx);
+        false
     }
 
     fn command(&self, id: u32) {
@@ -338,7 +339,9 @@ impl MainWin {
     }
 }
 
-fn create_main(xi_peer: XiPeer) -> Result<(WindowHandle, Rc<MainWin>), Error> {
+fn create_main(xi_peer: XiPeer, run_loop: RunLoopHandle)
+    -> Result<(WindowHandle, Rc<MainWin>), Error>
+{
     let main_state = MainWinState::new();
     let main_win = Rc::new(MainWin::new(xi_peer, main_state));
     let main_win_handler = MainWinHandler {
@@ -347,7 +350,7 @@ fn create_main(xi_peer: XiPeer) -> Result<(WindowHandle, Rc<MainWin>), Error> {
 
     let menubar = menus::create_menus();
 
-    let mut builder = WindowBuilder::new();
+    let mut builder = WindowBuilder::new(run_loop);
     builder.set_handler(Box::new(main_win_handler));
     builder.set_title("xi-editor");
     builder.set_menu(menubar);
@@ -360,9 +363,9 @@ fn main() {
 
     let (xi_peer, rx, semaphore) = start_xi_thread();
 
-    let (window, main_win) = create_main(xi_peer).unwrap();
-    window.show();
     let mut run_loop = win_main::RunLoop::new();
+    let (window, main_win) = create_main(xi_peer, run_loop.get_handle()).unwrap();
+    window.show();
     let run_handle = run_loop.get_handle();
     unsafe {
         run_handle.add_handler(semaphore.get_handle(), move || {
