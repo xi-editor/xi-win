@@ -48,7 +48,6 @@ use winapi::um::winuser::*;
 
 use direct2d::brush;
 use direct2d::math::*;
-use direct2d::render_target::DrawTextOption;
 use directwrite::text_format::{self, TextFormat};
 use directwrite::text_layout::{self, TextLayout};
 
@@ -61,6 +60,7 @@ use dialog::{get_open_file_dialog_path, get_save_file_dialog_path};
 use xi_thread::{start_xi_thread, XiPeer};
 
 use xi_win_shell::paint::PaintCtx;
+use xi_win_shell::util::default_text_options;
 use xi_win_shell::win_main::{self, RunLoopHandle};
 use xi_win_shell::window::{WindowBuilder, WindowHandle, WinHandler};
 
@@ -138,7 +138,7 @@ impl MainWinState {
                     &Point2F::from((x0, y)),
                     &layout,
                     &resources.fg,
-                    &[DrawTextOption::EnableColorFont]
+                    default_text_options()
                 );
                 for &offset in line.cursor() {
                     if let Some(pos) = layout.hit_test_text_position(offset as u32, true) {
