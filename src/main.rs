@@ -277,7 +277,7 @@ impl WinHandler for MainWinHandler {
         }
     }
 
-    fn char(&self, ch: u32) {
+    fn char(&self, ch: u32, _mods: u32) {
         match ch {
             0x08 => {
                 self.win.send_edit_cmd("delete_backward", &json!([]));
@@ -294,7 +294,7 @@ impl WinHandler for MainWinHandler {
         }
     }
 
-    fn keydown(&self, vk_code: i32) {
+    fn keydown(&self, vk_code: i32, _mods: u32) -> bool {
         // Handle special keys here
         match vk_code {
             VK_UP => {
@@ -312,8 +312,9 @@ impl WinHandler for MainWinHandler {
             VK_DELETE => {
                 self.win.send_edit_cmd("delete_forward", &json!([]));
             },
-            _ => ()
+            _ => return false
         }
+        true
     }
 
     fn destroy(&self) {
