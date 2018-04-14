@@ -173,6 +173,11 @@ impl WinHandler for MainWinHandler {
         self.win.req_new_view(None);
     }
 
+    fn size(&self, x: u32, y: u32) {
+        let (x_px, y_px) = self.win.handle.borrow().pixels_to_px_xy(x, y);
+        self.win.state.borrow_mut().edit_view.size(x_px, y_px);
+    }
+
     fn paint(&self, paint_ctx: &mut PaintCtx) -> bool {
         let mut state = self.win.state.borrow_mut();
         state.render(paint_ctx);
@@ -208,6 +213,11 @@ impl WinHandler for MainWinHandler {
     fn keydown(&self, vk_code: i32, mods: u32) -> bool {
         let edit_view = &mut self.win.state.borrow_mut().edit_view;
         edit_view.keydown(vk_code, mods, &self.win)
+    }
+
+    fn mouse_wheel(&self, delta: i32, mods: u32) {
+        let edit_view = &mut self.win.state.borrow_mut().edit_view;
+        edit_view.mouse_wheel(delta, mods, &self.win)
     }
 
     fn destroy(&self) {
@@ -263,12 +273,14 @@ fn main() {
     let run_handle = run_loop.get_handle();
     unsafe {
         run_handle.add_handler(semaphore.get_handle(), move || {
-            match rx.try_recv() {
-                Ok(v) => main_win.handle_cmd(&v),
-                Err(TryRecvError::Disconnected) => {
-                    println!("core disconnected");
+            loop {
+                match rx.try_recv() {
+                    Ok(v) => main_win.handle_cmd(&v),
+                    Err(TryRecvError::Disconnected) => {
+                        println!("core disconnected");
+                    }
+                    Err(TryRecvError::Empty) => break,
                 }
-                Err(TryRecvError::Empty) => (),
             }
         });
     }

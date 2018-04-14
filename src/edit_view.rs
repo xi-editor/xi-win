@@ -14,6 +14,9 @@
 
 //! The main edit view.
 
+use std::cmp::min;
+use std::ops::Range;
+
 use serde_json::Value;
 
 use winapi::um::winuser::*;
@@ -39,6 +42,9 @@ pub struct EditView {
     line_cache: LineCache,
     dwrite_factory: directwrite::Factory,
     resources: Option<Resources>,
+    scroll_offset: f32,
+    size: (f32, f32),  // in px units
+    viewport: Range<usize>,
 }
 
 struct Resources {
@@ -46,6 +52,9 @@ struct Resources {
     bg: brush::SolidColor,
     text_format: TextFormat,
 }
+
+const TOP_PAD: f32 = 6.0;
+const LINE_SPACE: f32 = 17.0;
 
 impl EditView {
     pub fn new() -> EditView {
@@ -55,6 +64,9 @@ impl EditView {
             line_cache: LineCache::new(),
             dwrite_factory: directwrite::Factory::new().unwrap(),
             resources: None,
+            scroll_offset: 0.0,
+            size: (0.0, 0.0),
+            viewport: 0..0,
         }
     }
 
@@ -72,6 +84,11 @@ impl EditView {
         }
     }
 
+    pub fn size(&mut self, x: f32, y: f32) {
+        self.size = (x, y);
+        self.constrain_scroll();
+    }
+
     pub fn clear_line_cache(&mut self) {
         self.line_cache = LineCache::new();
     }
@@ -82,13 +99,15 @@ impl EditView {
         }
         let resources = &self.resources.as_ref().unwrap();
         let rt = p.render_target();
-        let size = rt.get_size();
-        let rect = RectF::from((0.0, 0.0, size.width, size.height));
+        let rect = RectF::from((0.0, 0.0, self.size.0, self.size.1));
         rt.fill_rectangle(&rect, &resources.bg);
 
+        let first_line = self.y_to_line(0.0);
+        let last_line = min(self.y_to_line(self.size.1) + 1, self.line_cache.height());
+
         let x0 = 6.0;
-        let mut y = 6.0;
-        for line_num in 0..self.line_cache.height() {
+        let mut y = TOP_PAD + (first_line as f32) * LINE_SPACE - self.scroll_offset;
+        for line_num in first_line..last_line {
             if let Some(line) = self.line_cache.get_line(line_num) {
                 let layout = resources.create_text_layout(&self.dwrite_factory, line.text());
                 rt.draw_text_layout(
@@ -106,7 +125,7 @@ impl EditView {
                     }
                 }
             }
-            y += 17.0;
+            y += LINE_SPACE;
         }
     }
 
@@ -116,6 +135,7 @@ impl EditView {
 
     pub fn apply_update(&mut self, update: &Value) {
         self.line_cache.apply_update(update);
+        self.constrain_scroll();
     }
 
     pub fn char(&self, ch: u32, _mods: u32, win: &MainWin) {
@@ -144,7 +164,7 @@ impl EditView {
                 win.send_edit_cmd("move_up", &json!([]), view_id);
             },
             VK_DOWN => {
-                win.send_edit_cmd("move_down", &json!([]), view_id);
+                win.send_edit_cmd("move_down", &json!([]), view_id );
             },
             VK_LEFT => {
                 win.send_edit_cmd("move_left", &json!([]), view_id);
@@ -160,6 +180,43 @@ impl EditView {
         true
     }
 
+    pub fn mouse_wheel(&mut self, delta: i32, _mods: u32, win: &MainWin) {
+        // TODO: scale properly, taking SPI_GETWHEELSCROLLLINES into account
+        let scroll_scaling = 0.5;
+        self.scroll_offset -= (delta as f32) * scroll_scaling;
+        self.constrain_scroll();
+        self.update_viewport(win);
+        win.handle.borrow().invalidate();
+    }
+
+    fn constrain_scroll(&mut self) {
+        let max_scroll = TOP_PAD + LINE_SPACE *
+            (self.line_cache.height().saturating_sub(1)) as f32;
+        if self.scroll_offset < 0.0 {
+            self.scroll_offset = 0.0;
+        } else if self.scroll_offset > max_scroll {
+            self.scroll_offset = max_scroll;
+        }
+    }
+
+    // Takes y in screen-space px.
+    fn y_to_line(&self, y: f32) -> usize {
+        let mut line = (y + self.scroll_offset - TOP_PAD) / LINE_SPACE;
+        if line < 0.0 { line = 0.0; }
+        let line = line.floor() as usize;
+        min(line, self.line_cache.height())
+    }
+
+    fn update_viewport(&mut self, win: &MainWin) {
+        let first_line = self.y_to_line(0.0);
+        let last_line = first_line + ((self.size.1 / LINE_SPACE).floor() as usize) + 1;
+        let viewport = first_line..last_line;
+        if viewport != self.viewport {
+            self.viewport = viewport;
+            let view_id = &self.view_id;
+            win.send_edit_cmd("scroll", &json!([first_line, last_line]), view_id);
+        }
+    }
 }
 
 impl Resources {
