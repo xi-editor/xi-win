@@ -80,7 +80,7 @@ impl LineCache {
                 for _ in 0..n {
                     let _ = old_iter.next();
                 }
-            } else if op_type == "inval" {
+            } else if op_type == "invalidate" {
                 let n = op["n"].as_u64().unwrap();
                 for _ in 0..n {
                     self.push_opt_line(None);
