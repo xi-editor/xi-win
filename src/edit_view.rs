@@ -84,6 +84,10 @@ impl EditView {
         }
     }
 
+    pub fn rebuild_resources(&mut self) {
+        self.resources = None;
+    }
+
     pub fn size(&mut self, x: f32, y: f32) {
         self.size = (x, y);
         self.constrain_scroll();
