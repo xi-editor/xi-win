@@ -27,7 +27,7 @@ use winapi::shared::ntdef::HANDLE;
 
 use serde_json::{self, Value};
 
-use xi_core_lib;
+use xi_core_lib::XiCore;
 use xi_rpc::RpcLoop;
 
 pub struct XiPeer {
@@ -53,7 +53,7 @@ pub fn start_xi_thread() -> (XiPeer, Receiver<Value>, Semaphore) {
         sender: from_core_tx,
         semaphore: semaphore.clone(),
     };
-    let mut state = xi_core_lib::MainState::new();
+    let mut state = XiCore::new();
     let mut rpc_looper = RpcLoop::new(from_core_tx);
     thread::spawn(move ||
         rpc_looper.mainloop(|| to_core_rx, &mut state)
