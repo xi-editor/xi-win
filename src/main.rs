@@ -111,11 +111,12 @@ impl MainWin {
         self.send_notification("edit", &edit_params);
     }
 
+    // TODO: arguably these should be moved to MainWinHandler to avoid the need
+    // for the parent reference.
     fn file_open(&self, hwnd_owner: HWND) {
         let filename = unsafe { get_open_file_dialog_path(hwnd_owner) };
         if let Some(filename) = filename {
-            // TODO
-            //self.req_new_view(Some(&filename));
+            self.req_new_view(Some(&filename));
             let mut state = self.state.borrow_mut();
             state.edit_view.filename = Some(filename);
             state.edit_view.clear_line_cache();
@@ -152,7 +153,7 @@ impl WinHandler for MainWinHandler {
     fn connect(&self, handle: &WindowHandle) {
         *self.win.handle.borrow_mut() = handle.clone();
         self.win.send_notification("client_started", &json!({}));
-        self.req_new_view(None);
+        self.win.req_new_view(None);
     }
 
     fn size(&self, x: u32, y: u32) {
@@ -214,14 +215,14 @@ impl WinHandler for MainWinHandler {
     fn as_any(&self) -> &Any { self }
 }
 
-impl MainWinHandler {
+impl MainWin {
     fn req_new_view(&self, filename: Option<&str>) {
         let mut params = json!({});
         if let Some(filename) = filename {
             params["file_path"] = json!(filename);
         }
-        let handle = self.win.handle.borrow().get_idle_handle().unwrap();
-        self.win.core.borrow_mut().send_request("new_view", &params,
+        let handle = self.handle.borrow().get_idle_handle().unwrap();
+        self.core.borrow_mut().send_request("new_view", &params,
             move |value| {
                 let value = value.clone();
                 handle.add_idle(move |a| {
@@ -232,9 +233,7 @@ impl MainWinHandler {
             }
         );
     }
-}
 
-impl MainWin {
     fn handle_cmd(&self, method: &str, params: &Value) {
         let mut state = self.state.borrow_mut();
         //println!("got {:?}", v);
