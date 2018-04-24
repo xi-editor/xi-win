@@ -43,7 +43,7 @@ mod rpc;
 mod xi_thread;
 
 use std::any::Any;
-use std::cell::RefCell;
+use std::cell::{RefCell, RefMut};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
@@ -113,8 +113,6 @@ impl MainWin {
         self.send_notification("edit", &edit_params);
     }
 
-    // TODO: arguably these should be moved to MainWinHandler to avoid the need
-    // for the parent reference.
     fn file_open(&self, hwnd_owner: HWND) {
         let filename = unsafe { get_open_file_dialog_path(hwnd_owner) };
         if let Some(filename) = filename {
@@ -160,18 +158,16 @@ impl WinHandler for MainWinHandler {
 
     fn size(&self, x: u32, y: u32) {
         let (x_px, y_px) = self.win.handle.borrow().pixels_to_px_xy(x, y);
-        self.win.state.borrow_mut().edit_view.size(x_px, y_px);
+        self.s().edit_view.size(x_px, y_px);
     }
 
     fn paint(&self, paint_ctx: &mut PaintCtx) -> bool {
-        let mut state = self.win.state.borrow_mut();
-        state.render(paint_ctx);
+        self.s().render(paint_ctx);
         false
     }
 
     fn rebuild_resources(&self) {
-        let mut state = self.win.state.borrow_mut();
-        state.edit_view.rebuild_resources();
+        self.s().edit_view.rebuild_resources();
     }
 
     fn command(&self, id: u32) {
@@ -193,57 +189,53 @@ impl WinHandler for MainWinHandler {
             }
 
             x if x == MenuEntries::Undo as u32 => {
-                self.win.state.borrow_mut().edit_view.undo(&self.win);
+                self.s().edit_view.undo(&self.win);
             }
             x if x == MenuEntries::Redo as u32 => {
-                self.win.state.borrow_mut().edit_view.redo(&self.win);
+                self.s().edit_view.redo(&self.win);
             }
             // TODO: cut, copy, paste (requires pasteboard)
             x if x == MenuEntries::UpperCase as u32 => {
-                self.win.state.borrow_mut().edit_view.upper_case(&self.win);
+                self.s().edit_view.upper_case(&self.win);
             }
             x if x == MenuEntries::LowerCase as u32 => {
-                self.win.state.borrow_mut().edit_view.lower_case(&self.win);
+                self.s().edit_view.lower_case(&self.win);
             }
             x if x == MenuEntries::Transpose as u32 => {
-                self.win.state.borrow_mut().edit_view.transpose(&self.win);
+                self.s().edit_view.transpose(&self.win);
             }
 
             x if x == MenuEntries::AddCursorAbove as u32 => {
-                self.win.state.borrow_mut().edit_view.add_cursor_above(&self.win);
+                self.s().edit_view.add_cursor_above(&self.win);
             }
             x if x == MenuEntries::AddCursorBelow as u32 => {
-                self.win.state.borrow_mut().edit_view.add_cursor_below(&self.win);
+                self.s().edit_view.add_cursor_below(&self.win);
             }
             x if x == MenuEntries::SingleSelection as u32 => {
-                self.win.state.borrow_mut().edit_view.single_selection(&self.win);
+                self.s().edit_view.single_selection(&self.win);
             }
             x if x == MenuEntries::SelectAll as u32 => {
-                self.win.state.borrow_mut().edit_view.select_all(&self.win);
+                self.s().edit_view.select_all(&self.win);
             }
             _ => println!("unexpected id {}", id),
         }
     }
 
     fn char(&self, ch: u32, mods: u32) {
-        let edit_view = &mut self.win.state.borrow_mut().edit_view;
-        edit_view.char(ch, mods, &self.win);
+        self.s().edit_view.char(ch, mods, &self.win);
     }
 
     fn keydown(&self, vk_code: i32, mods: u32) -> bool {
-        let edit_view = &mut self.win.state.borrow_mut().edit_view;
-        edit_view.keydown(vk_code, mods, &self.win)
+        self.s().edit_view.keydown(vk_code, mods, &self.win)
     }
 
     fn mouse(&self, x: i32, y: i32, mods: u32, which: MouseButton, ty: MouseType) {
         let (x_px, y_px) = self.win.handle.borrow().pixels_to_px_xy(x, y);
-        let edit_view = &mut self.win.state.borrow_mut().edit_view;
-        edit_view.mouse(x_px, y_px, mods, which, ty, &self.win);
+        self.s().edit_view.mouse(x_px, y_px, mods, which, ty, &self.win);
     }
 
     fn mouse_wheel(&self, delta: i32, mods: u32) {
-        let edit_view = &mut self.win.state.borrow_mut().edit_view;
-        edit_view.mouse_wheel(delta, mods, &self.win)
+        self.s().edit_view.mouse_wheel(delta, mods, &self.win)
     }
 
     fn destroy(&self) {
@@ -251,6 +243,13 @@ impl WinHandler for MainWinHandler {
     }
 
     fn as_any(&self) -> &Any { self }
+}
+
+impl MainWinHandler {
+    /// Convenience function for accessing state.
+    fn s(&self) -> RefMut<MainWinState> {
+        self.win.state.borrow_mut()
+    }
 }
 
 impl MainWin {
