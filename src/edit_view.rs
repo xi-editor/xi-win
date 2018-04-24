@@ -54,6 +54,7 @@ struct Resources {
 }
 
 const TOP_PAD: f32 = 6.0;
+const LEFT_PAD: f32 = 6.0;
 const LINE_SPACE: f32 = 17.0;
 
 impl EditView {
@@ -109,7 +110,7 @@ impl EditView {
         let first_line = self.y_to_line(0.0);
         let last_line = min(self.y_to_line(self.size.1) + 1, self.line_cache.height());
 
-        let x0 = 6.0;
+        let x0 = LEFT_PAD;
         let mut y = self.line_to_content_y(first_line) - self.scroll_offset;
         for line_num in first_line..last_line {
             if let Some(textline) = self.get_text_line(line_num) {
@@ -340,8 +341,7 @@ impl EditView {
         win: &MainWin)
     {
         if which == MouseButton::Left && ty == MouseType::Down {
-            let line = self.y_to_line(y);
-            let col = 0;  // TODO
+            let (line, col) = self.xy_to_line_col(x, y);
             let params = json!({
                 "ty": "point_select",
                 "line": line,
@@ -377,6 +377,19 @@ impl EditView {
         if line < 0.0 { line = 0.0; }
         let line = line.floor() as usize;
         min(line, self.line_cache.height())
+    }
+
+    /// Takes x, y in screen-space px, returns line number and utf8 offset within line.
+    fn xy_to_line_col(&self, x: f32, y: f32) -> (usize, usize) {
+        let line_num = self.y_to_line(y);
+        let col = if let (Some(textline), Some(line)) =
+            (self.get_text_line(line_num), self.line_cache.get_line(line_num))
+        {
+            textline.hit_test(x - LEFT_PAD, 0.0, line.text())
+        } else {
+            0
+        };
+        (line_num, col)
     }
 
     /// Convert line number to y coordinate in content space.

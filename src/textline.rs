@@ -69,14 +69,39 @@ impl TextLine {
             }
         }
     }
+
+    /// Return the utf-8 offset corresponding to the point (relative to top left corner).
+    ///
+    /// The `text` parameter is for utf-16 to utf-8 conversion, and is to avoid having
+    /// to stash a separate copy.
+    pub fn hit_test(&self, x: f32, y: f32, text: &str) -> usize {
+        let hit = self.layout.hit_test_point(x, y);
+        let utf16_offset = hit.metrics.text_position() as usize;
+        conv_utf16_to_utf8_offset(text, utf16_offset)
+        // TODO: if hit.is_trailing_hit is true, we want the next grapheme cluster
+        // boundary (requires wiring up unicode segmentation crate).
+    }
 }
 
 /// Counts the number of utf-16 code units in the given string.
 fn count_utf16(s: &str) -> usize {
-    let mut count = 0;
+    let mut utf16_count = 0;
     for &b in s.as_bytes() {
-        if (b as i8) >= -0x40 { count += 1; }
-        if b >= 0xf0 { count += 1; }
+        if (b as i8) >= -0x40 { utf16_count += 1; }
+        if b >= 0xf0 { utf16_count += 1; }
     }
-    count
+    utf16_count
+}
+
+/// Convert utf-16 code unit offset to utf-8 code unit offset.
+fn conv_utf16_to_utf8_offset(s: &str, utf16_offset: usize) -> usize {
+    let mut utf16_count = 0;
+    for (i, &b) in s.as_bytes().iter().enumerate() {
+        if utf16_count == utf16_offset {
+            return i;
+        }
+        if (b as i8) >= -0x40 { utf16_count += 1; }
+        if b >= 0xf0 { utf16_count += 1; }
+    }
+    s.len()
 }
