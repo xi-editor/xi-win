@@ -110,7 +110,7 @@ impl EditView {
         let last_line = min(self.y_to_line(self.size.1) + 1, self.line_cache.height());
 
         let x0 = 6.0;
-        let mut y = TOP_PAD + (first_line as f32) * LINE_SPACE - self.scroll_offset;
+        let mut y = self.line_to_content_y(first_line) - self.scroll_offset;
         for line_num in first_line..last_line {
             if let Some(line) = self.line_cache.get_line(line_num) {
                 let layout = resources.create_text_layout(&self.dwrite_factory, line.text());
@@ -211,6 +211,11 @@ impl EditView {
         min(line, self.line_cache.height())
     }
 
+    /// Convert line number to y coordinate in content space.
+    fn line_to_content_y(&self, line: usize) -> f32 {
+        TOP_PAD + (line as f32) * LINE_SPACE
+    }
+
     fn update_viewport(&mut self, win: &MainWin) {
         let first_line = self.y_to_line(0.0);
         let last_line = first_line + ((self.size.1 / LINE_SPACE).floor() as usize) + 1;
@@ -219,6 +224,16 @@ impl EditView {
             self.viewport = viewport;
             let view_id = &self.view_id;
             win.send_edit_cmd("scroll", &json!([first_line, last_line]), view_id);
+        }
+    }
+
+    pub fn scroll_to(&mut self, line: usize) {
+        let y = self.line_to_content_y(line);
+        let bottom_slop = 20.0;
+        if y < self.scroll_offset {
+            self.scroll_offset = y;
+        } else if y > self.scroll_offset + self.size.1 - bottom_slop {
+            self.scroll_offset = y - (self.size.1 - bottom_slop)
         }
     }
 }

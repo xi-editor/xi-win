@@ -236,10 +236,15 @@ impl MainWin {
 
     fn handle_cmd(&self, method: &str, params: &Value) {
         let mut state = self.state.borrow_mut();
-        //println!("got {:?}", v);
-        if method == "update" {
-            state.edit_view.apply_update(&params["update"]);
+        match method {
+            "update" => state.edit_view.apply_update(&params["update"]),
+            "scroll_to" => state.edit_view.scroll_to(params["line"].as_u64().unwrap() as usize),
+            "available_themes" => (), // TODO
+            "available_plugins" => (), // TODO
+            "config_changed" => (), // TODO
+            _ => println!("unhandled core->fe method {}", method),
         }
+        // TODO: edit view should probably handle this logic
         self.handle.borrow().invalidate();
     }
 }
