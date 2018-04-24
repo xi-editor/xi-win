@@ -32,6 +32,7 @@ extern crate serde_json;
 
 extern crate xi_core_lib;
 extern crate xi_rpc;
+#[macro_use]
 extern crate xi_win_shell;
 
 mod dialog;
@@ -189,6 +190,36 @@ impl WinHandler for MainWinHandler {
                 let hwnd = self.win.handle.borrow().get_hwnd().unwrap();
                 self.win.file_save_as(hwnd);
             }
+
+            x if x == MenuEntries::Undo as u32 => {
+                self.win.state.borrow_mut().edit_view.undo(&self.win);
+            }
+            x if x == MenuEntries::Redo as u32 => {
+                self.win.state.borrow_mut().edit_view.redo(&self.win);
+            }
+            // TODO: cut, copy, paste (requires pasteboard)
+            x if x == MenuEntries::UpperCase as u32 => {
+                self.win.state.borrow_mut().edit_view.upper_case(&self.win);
+            }
+            x if x == MenuEntries::LowerCase as u32 => {
+                self.win.state.borrow_mut().edit_view.lower_case(&self.win);
+            }
+            x if x == MenuEntries::Transpose as u32 => {
+                self.win.state.borrow_mut().edit_view.transpose(&self.win);
+            }
+
+            x if x == MenuEntries::AddCursorAbove as u32 => {
+                self.win.state.borrow_mut().edit_view.add_cursor_above(&self.win);
+            }
+            x if x == MenuEntries::AddCursorBelow as u32 => {
+                self.win.state.borrow_mut().edit_view.add_cursor_below(&self.win);
+            }
+            x if x == MenuEntries::SingleSelection as u32 => {
+                self.win.state.borrow_mut().edit_view.single_selection(&self.win);
+            }
+            x if x == MenuEntries::SelectAll as u32 => {
+                self.win.state.borrow_mut().edit_view.select_all(&self.win);
+            }
             _ => println!("unexpected id {}", id),
         }
     }
@@ -305,6 +336,7 @@ fn main() {
     let (xi_peer, rx) = start_xi_thread();
 
     let mut runloop = win_main::RunLoop::new();
+    menus::set_accel(&mut runloop);
     let handler = MyHandler::new(runloop.get_handle());
     let core = Core::new(xi_peer, rx, handler.clone());
     let window = create_main(core).unwrap();

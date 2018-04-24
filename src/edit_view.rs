@@ -293,6 +293,52 @@ impl EditView {
         true
     }
 
+    // Commands
+
+    pub fn undo(&mut self, win: &MainWin) {
+        self.send_action("undo", win);
+    }
+
+    pub fn redo(&mut self, win: &MainWin) {
+        self.send_action("redo", win);
+    }
+
+    pub fn upper_case(&mut self, win: &MainWin) {
+        self.send_action("uppercase", win);
+    }
+
+    pub fn lower_case(&mut self, win: &MainWin) {
+        self.send_action("lowercase", win);
+    }
+
+    pub fn transpose(&mut self, win: &MainWin) {
+        self.send_action("transpose", win);
+    }
+
+    pub fn add_cursor_above(&mut self, win: &MainWin) {
+        // Note: some subtlety around find, the escape key cancels it, but the menu
+        // shouldn't.
+        self.send_action("add_selection_above", win);
+    }
+
+    pub fn add_cursor_below(&mut self, win: &MainWin) {
+        // Note: some subtlety around find, the escape key cancels it, but the menu
+        // shouldn't.
+        self.send_action("add_selection_below", win);
+    }
+
+    pub fn single_selection(&mut self, win: &MainWin) {
+        // Note: some subtlety around find, the escape key cancels it, but the menu
+        // shouldn't.
+        self.send_action("cancel_operation", win);
+    }
+
+    pub fn select_all(&mut self, win: &MainWin) {
+        // Note: some subtlety around find, the escape key cancels it, but the menu
+        // shouldn't.
+        self.send_action("select_all", win);
+    }
+
     pub fn mouse_wheel(&mut self, delta: i32, _mods: u32, win: &MainWin) {
         // TODO: scale properly, taking SPI_GETWHEELSCROLLLINES into account
         let scroll_scaling = 0.5;
