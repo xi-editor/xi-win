@@ -40,6 +40,7 @@ mod edit_view;
 mod linecache;
 mod menus;
 mod rpc;
+mod textline;
 mod xi_thread;
 
 use std::any::Any;

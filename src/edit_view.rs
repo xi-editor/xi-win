@@ -23,17 +23,16 @@ use winapi::um::winuser::*;
 
 use direct2d::brush;
 use direct2d::math::*;
-use directwrite::{self, TextFormat, TextLayout};
+use directwrite::{self, TextFormat};
 use directwrite::text_format;
-use directwrite::text_layout;
 
 use xi_win_shell::paint::PaintCtx;
-use xi_win_shell::util::default_text_options;
 use xi_win_shell::window::{M_ALT, M_CTRL, M_SHIFT, MouseButton, MouseType};
 
 use MainWin;
 
 use linecache::LineCache;
+use textline::TextLine;
 
 /// State and behavior for one editor view.
 pub struct EditView {
@@ -113,25 +112,20 @@ impl EditView {
         let x0 = 6.0;
         let mut y = self.line_to_content_y(first_line) - self.scroll_offset;
         for line_num in first_line..last_line {
-            if let Some(line) = self.line_cache.get_line(line_num) {
-                let layout = resources.create_text_layout(&self.dwrite_factory, line.text());
-                rt.draw_text_layout(
-                    &Point2F::from((x0, y)),
-                    &layout,
-                    &resources.fg,
-                    default_text_options()
-                );
-                for &offset in line.cursor() {
-                    if let Some(pos) = layout.hit_test_text_position(offset as u32, true) {
-                        let x = x0 + pos.point_x;
-                        rt.draw_line(&Point2F::from((x, y)),
-                            &Point2F::from((x, y + 17.0)),
-                            &resources.fg, 1.0, None);
-                    }
-                }
+            if let Some(textline) = self.get_text_line(line_num) {
+                textline.draw_text(rt, x0, y, &resources.fg);
+                textline.draw_cursor(rt, x0, y, &resources.fg);
             }
             y += LINE_SPACE;
         }
+    }
+
+    // signature will change when we start caching
+    fn get_text_line(&self, line_num: usize) -> Option<TextLine> {
+        self.line_cache.get_line(line_num).map(|line| {
+            let format = &self.resources.as_ref().unwrap().text_format;
+            TextLine::create_from_line(&line, &self.dwrite_factory, format)
+        })
     }
 
     pub fn set_view_id(&mut self, view_id: &str) {
@@ -414,16 +408,4 @@ impl EditView {
 // Helper function for choosing between normal and shifted action
 fn s<'a>(mods: u32, normal: &'a str, shifted: &'a str) -> &'a str {
     if (mods & M_SHIFT) != 0 { shifted } else { normal }
-}
-
-impl Resources {
-    fn create_text_layout(&self, factory: &directwrite::Factory, text: &str) -> TextLayout {
-        let params = text_layout::ParamBuilder::new()
-            .text(text)
-            .font(self.text_format.clone())
-            .width(1e6)
-            .height(1e6)
-            .build().unwrap();
-        factory.create(params).unwrap()
-    }
 }
