@@ -38,11 +38,13 @@ mod dialog;
 mod edit_view;
 mod linecache;
 mod menus;
+mod rpc;
 mod xi_thread;
 
+use std::any::Any;
 use std::cell::RefCell;
-use std::sync::mpsc::TryRecvError;
 use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 use winapi::shared::windef::*;
 
@@ -50,25 +52,22 @@ use serde_json::Value;
 
 use edit_view::EditView;
 use menus::MenuEntries;
+use rpc::{Core, Handler};
 use xi_win_shell::util::Error;
 use dialog::{get_open_file_dialog_path, get_save_file_dialog_path};
-use xi_thread::{start_xi_thread, XiPeer};
+use xi_thread::start_xi_thread;
 
 use xi_win_shell::paint::PaintCtx;
 use xi_win_shell::win_main::{self, RunLoopHandle};
-use xi_win_shell::window::{WindowBuilder, WindowHandle, WinHandler};
+use xi_win_shell::window::{IdleHandle, WindowBuilder, WindowHandle, WinHandler};
 
 struct MainWinState {
-    rpc_id: usize,
-    label: String,
     edit_view: EditView,
 }
 
 impl MainWinState {
     fn new() -> MainWinState {
         MainWinState {
-            rpc_id: 0,
-            label: "hello direct2d".to_string(),
             edit_view: EditView::new(),
         }
     }
@@ -84,26 +83,22 @@ struct MainWinHandler {
 
 // Maybe combine all this, put as a single item inside a RefCell.
 pub struct MainWin {
-    peer: XiPeer,
+    core: RefCell<Core>,
     handle: RefCell<WindowHandle>,
     state: RefCell<MainWinState>,
 }
 
 impl MainWin {
-    fn new(peer: XiPeer, state: MainWinState) -> MainWin {
+    fn new(core: Core, state: MainWinState) -> MainWin {
         MainWin {
-            peer: peer,
+            core: RefCell::new(core),
             handle: Default::default(),
             state: RefCell::new(state),
         }
     }
 
     fn send_notification(&self, method: &str, params: &Value) {
-        let cmd = json!({
-            "method": method,
-            "params": params,
-        });
-        self.peer.send_json(&cmd);
+        self.core.borrow().send_notification(method, params);
     }
 
     // Note: caller can't be borrowing the state.
@@ -116,6 +111,8 @@ impl MainWin {
         self.send_notification("edit", &edit_params);
     }
 
+    // TODO: arguably these should be moved to MainWinHandler to avoid the need
+    // for the parent reference.
     fn file_open(&self, hwnd_owner: HWND) {
         let filename = unsafe { get_open_file_dialog_path(hwnd_owner) };
         if let Some(filename) = filename {
@@ -149,20 +146,6 @@ impl MainWin {
 
             state.edit_view.filename = Some(filename.clone());
         }
-    }
-
-    fn req_new_view(&self, filename: Option<&str>) {
-        let mut params = json!({});
-        if let Some(filename) = filename {
-            params["file_path"] = json!(filename);
-        }
-        let cmd = json!({
-            "method": "new_view",
-            "params": params,
-            "id": self.state.borrow().rpc_id,
-        });
-        self.state.borrow_mut().rpc_id += 1;
-        self.peer.send_json(&cmd);
     }
 }
 
@@ -228,66 +211,95 @@ impl WinHandler for MainWinHandler {
     fn destroy(&self) {
         win_main::request_quit();
     }
+
+    fn as_any(&self) -> &Any { self }
 }
 
 impl MainWin {
-    fn handle_cmd(&self, v: &Value) {
+    fn req_new_view(&self, filename: Option<&str>) {
+        let mut params = json!({});
+        if let Some(filename) = filename {
+            params["file_path"] = json!(filename);
+        }
+        let handle = self.handle.borrow().get_idle_handle().unwrap();
+        self.core.borrow_mut().send_request("new_view", &params,
+            move |value| {
+                let value = value.clone();
+                handle.add_idle(move |a| {
+                    let handler = a.downcast_ref::<MainWinHandler>().unwrap();
+                    let edit_view = &mut handler.win.state.borrow_mut().edit_view;
+                    edit_view.set_view_id(value.as_str().unwrap());
+                });
+            }
+        );
+    }
+
+    fn handle_cmd(&self, method: &str, params: &Value) {
         let mut state = self.state.borrow_mut();
         //println!("got {:?}", v);
-        if let Some(tab_name) = v["result"].as_str() {
-            // TODO: should match up id etc. This is quick and dirty.
-            state.edit_view.set_view_id(tab_name);
-        } else {
-            let ref method = v["method"];
-            if method == "update" {
-                state.edit_view.apply_update(&v["params"]["update"]);
-            }
+        if method == "update" {
+            state.edit_view.apply_update(&params["update"]);
         }
-        state.label = serde_json::to_string(v).unwrap();
         self.handle.borrow().invalidate();
     }
 }
 
-fn create_main(xi_peer: XiPeer, run_loop: RunLoopHandle)
-    -> Result<(WindowHandle, Rc<MainWin>), Error>
-{
+fn create_main(core: Core) -> Result<WindowHandle, Error> {
     let main_state = MainWinState::new();
-    let main_win = Rc::new(MainWin::new(xi_peer, main_state));
+    let main_win = Rc::new(MainWin::new(core, main_state));
     let main_win_handler = MainWinHandler {
-        win: main_win.clone(),
+        win: main_win,
     };
 
     let menubar = menus::create_menus();
 
-    let mut builder = WindowBuilder::new(run_loop);
+    let mut builder = WindowBuilder::new();
     builder.set_handler(Box::new(main_win_handler));
     builder.set_title("xi-editor");
     builder.set_menu(menubar);
     let window = builder.build().unwrap();
-    Ok((window, main_win))
+    Ok(window)
+}
+
+#[derive(Clone)]
+struct MyHandler {
+    runloop: RunLoopHandle,
+    win_handle: Arc<Mutex<Option<IdleHandle>>>,
+}
+
+impl MyHandler {
+    fn new(runloop: RunLoopHandle) -> MyHandler {
+        MyHandler {
+            runloop,
+            win_handle: Default::default(),
+        }
+    }
+}
+
+impl Handler for MyHandler {
+    fn notification(&self, method: &str, params: &Value) {
+        if let Some(idle_handle) = self.win_handle.lock().unwrap().as_ref() {
+            // Note: could pass these by ownership, but we'll change where they get parsed.
+            let method = method.to_owned();
+            let params = params.clone();
+            idle_handle.add_idle(move |a| {
+                let handler = a.downcast_ref::<MainWinHandler>().unwrap();
+                handler.win.handle_cmd(&method, &params);
+            });
+        }
+    }
 }
 
 fn main() {
     xi_win_shell::init();
 
-    let (xi_peer, rx, semaphore) = start_xi_thread();
+    let (xi_peer, rx) = start_xi_thread();
 
-    let mut run_loop = win_main::RunLoop::new();
-    let (window, main_win) = create_main(xi_peer, run_loop.get_handle()).unwrap();
+    let mut runloop = win_main::RunLoop::new();
+    let handler = MyHandler::new(runloop.get_handle());
+    let core = Core::new(xi_peer, rx, handler.clone());
+    let window = create_main(core).unwrap();
+    *handler.win_handle.lock().unwrap() = window.get_idle_handle();
     window.show();
-    let run_handle = run_loop.get_handle();
-    unsafe {
-        run_handle.add_handler(semaphore.get_handle(), move || {
-            loop {
-                match rx.try_recv() {
-                    Ok(v) => main_win.handle_cmd(&v),
-                    Err(TryRecvError::Disconnected) => {
-                        println!("core disconnected");
-                    }
-                    Err(TryRecvError::Empty) => break,
-                }
-            }
-        });
-    }
-    run_loop.run();
+    runloop.run();
 }
