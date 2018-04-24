@@ -29,6 +29,7 @@ use directwrite::text_layout;
 
 use xi_win_shell::paint::PaintCtx;
 use xi_win_shell::util::default_text_options;
+use xi_win_shell::window::{M_ALT, M_CTRL, M_SHIFT};
 
 use MainWin;
 
@@ -144,42 +145,150 @@ impl EditView {
 
     pub fn char(&self, ch: u32, _mods: u32, win: &MainWin) {
         let view_id = &self.view_id;
-        match ch {
-            0x08 => {
-                win.send_edit_cmd("delete_backward", &json!([]), view_id);
-            },
-            0x0d => {
-                win.send_edit_cmd("insert_newline", &json!([]), view_id);
-            },
-            _ => {
-                if let Some(c) = ::std::char::from_u32(ch) {
-                    let params = json!({"chars": c.to_string()});
-                    win.send_edit_cmd("insert", &params, view_id);
-                }
+        if let Some(c) = ::std::char::from_u32(ch) {
+            if ch >= 0x20 {
+                // Don't insert control characters
+                let params = json!({"chars": c.to_string()});
+                win.send_edit_cmd("insert", &params, view_id);
             }
         }
     }
 
-    pub fn keydown(&self, vk_code: i32, _mods: u32, win: &MainWin) -> bool {
-        let view_id = &self.view_id;
+    /// Sends a simple action with no parameters
+    fn send_action(&self, method: &str, win: &MainWin) {
+        win.send_edit_cmd(method, &json!([]), &self.view_id);
+    }
+
+    pub fn keydown(&mut self, vk_code: i32, mods: u32, win: &MainWin) -> bool {
         // Handle special keys here
         match vk_code {
+            VK_RETURN => {
+                // TODO: modifiers are variants of open
+                self.send_action("insert_newline", win);
+            }
+            VK_TAB => {
+                // TODO: modified versions
+                self.send_action("insert_tab", win);
+            }
             VK_UP => {
-                win.send_edit_cmd("move_up", &json!([]), view_id);
-            },
+                if mods == M_CTRL {
+                    self.scroll_offset -= LINE_SPACE;
+                    self.constrain_scroll();
+                    self.update_viewport(win);
+                    win.invalidate();
+                } else {
+                    let action = if mods == M_CTRL | M_ALT {
+                        "add_selection_above"
+                    } else {
+                        s(mods, "move_up", "move_up_and_modify_selection")
+                    };
+                    // TODO: swap line up is ctrl + shift
+                    self.send_action(action, win);
+                }
+            }
             VK_DOWN => {
-                win.send_edit_cmd("move_down", &json!([]), view_id );
-            },
+                if mods == M_CTRL {
+                    self.scroll_offset += LINE_SPACE;
+                    self.constrain_scroll();
+                    self.update_viewport(win);
+                    win.invalidate();
+                } else {
+                    let action = if mods == M_CTRL | M_ALT {
+                        "add_selection_below"
+                    } else {
+                        s(mods, "move_down", "move_down_and_modify_selection")
+                    };
+                    self.send_action(action, win);
+                }
+            }
             VK_LEFT => {
-                win.send_edit_cmd("move_left", &json!([]), view_id);
-            },
+                // TODO: there is a subtle distinction between alt and ctrl
+                let action = if (mods & (M_ALT | M_CTRL)) != 0 {
+                    s(mods, "move_word_left", "move_word_left_and_modify_selection")
+                } else {
+                    s(mods, "move_left", "move_left_and_modify_selection")
+                };
+                self.send_action(action, win);
+            }
             VK_RIGHT => {
-                win.send_edit_cmd("move_right", &json!([]), view_id);
-            },
+                // TODO: there is a subtle distinction between alt and ctrl
+                let action = if (mods & (M_ALT | M_CTRL)) != 0 {
+                    s(mods, "move_word_right", "move_word_right_and_modify_selection")
+                } else {
+                    s(mods, "move_right", "move_right_and_modify_selection")
+                };
+                self.send_action(action, win);
+            }
+            VK_PRIOR => {
+                self.send_action(s(mods, "scroll_page_up",
+                    "page_up_and_modify_selection"), win);
+            }
+            VK_NEXT => {
+                self.send_action(s(mods, "scroll_page_down",
+                    "page_down_and_modify_selection"), win);
+            }
+            VK_HOME => {
+                let action = if (mods & M_CTRL) != 0 {
+                    s(mods, "move_to_beginning_of_document",
+                        "move_to_beginning_of_document_and_modify_selection")
+                } else {
+                    s(mods, "move_to_left_end_of_line",
+                        "move_to_left_end_of_line_and_modify_selection")
+                };
+                self.send_action(action, win);
+            }
+            VK_END => {
+                let action = if (mods & M_CTRL) != 0 {
+                    s(mods, "move_to_end_of_document",
+                        "move_to_end_of_document_and_modify_selection")
+                } else {
+                    s(mods, "move_to_right_end_of_line",
+                        "move_to_right_end_of_line_and_modify_selection")
+                };
+                self.send_action(action, win);
+            }
+            VK_ESCAPE => {
+                self.send_action("cancel_operation", win);
+            }
+            VK_BACK => {
+                let action = if (mods & M_CTRL) != 0 {
+                    // should be "delete to beginning of paragraph" but not supported
+                    s(mods, "delete_word_backward", "delete_to_beginning_of_line")
+                } else {
+                    "delete_backward"
+                };
+                self.send_action(action, win);
+                self.send_action("delete_forward", win);
+            }
             VK_DELETE => {
-                win.send_edit_cmd("delete_forward", &json!([]), view_id);
-            },
-            _ => return false
+                let action = if (mods & M_CTRL) != 0 {
+                    s(mods, "delete_word_forward", "delete_to_end_of_paragraph")
+                } else {
+                    // TODO: shift-delete should be "delete line"
+                    "delete_forward"
+                };
+                self.send_action(action, win);
+                self.send_action("delete_forward", win);
+            }
+            VK_OEM_4 => {
+                // generally '[' key, but might vary on non-US keyboards
+                if mods == M_CTRL {
+                    self.send_action("outdent", win);
+                } else {
+                    return false
+                }
+            }
+            VK_OEM_6 => {
+                // generally ']' key, but might vary on non-US keyboards
+                if mods == M_CTRL {
+                    self.send_action("indent", win);
+                } else {
+                    return false
+                }
+            }
+            _ => {
+                return false
+            }
         }
         true
     }
@@ -236,6 +345,11 @@ impl EditView {
             self.scroll_offset = y - (self.size.1 - bottom_slop)
         }
     }
+}
+
+// Helper function for choosing between normal and shifted action
+fn s<'a>(mods: u32, normal: &'a str, shifted: &'a str) -> &'a str {
+    if (mods & M_SHIFT) != 0 { shifted } else { normal }
 }
 
 impl Resources {

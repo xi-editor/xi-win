@@ -245,6 +245,10 @@ impl MainWin {
             _ => println!("unhandled core->fe method {}", method),
         }
         // TODO: edit view should probably handle this logic
+        self.invalidate();
+    }
+
+    pub fn invalidate(&self) {
         self.handle.borrow().invalidate();
     }
 }
