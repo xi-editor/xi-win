@@ -29,7 +29,7 @@ use directwrite::text_layout;
 
 use xi_win_shell::paint::PaintCtx;
 use xi_win_shell::util::default_text_options;
-use xi_win_shell::window::{M_ALT, M_CTRL, M_SHIFT};
+use xi_win_shell::window::{M_ALT, M_CTRL, M_SHIFT, MouseButton, MouseType};
 
 use MainWin;
 
@@ -144,19 +144,22 @@ impl EditView {
     }
 
     pub fn char(&self, ch: u32, _mods: u32, win: &MainWin) {
-        let view_id = &self.view_id;
         if let Some(c) = ::std::char::from_u32(ch) {
             if ch >= 0x20 {
                 // Don't insert control characters
                 let params = json!({"chars": c.to_string()});
-                win.send_edit_cmd("insert", &params, view_id);
+                self.send_edit_cmd("insert", &params, win);
             }
         }
     }
 
+    fn send_edit_cmd(&self, method: &str, params: &Value, win: &MainWin) {
+        win.send_edit_cmd(method, params, &self.view_id);
+    }
+
     /// Sends a simple action with no parameters
     fn send_action(&self, method: &str, win: &MainWin) {
-        win.send_edit_cmd(method, &json!([]), &self.view_id);
+        self.send_edit_cmd(method, &json!([]), win);
     }
 
     pub fn keydown(&mut self, vk_code: i32, mods: u32, win: &MainWin) -> bool {
@@ -339,6 +342,22 @@ impl EditView {
         self.send_action("select_all", win);
     }
 
+    pub fn mouse(&self, x: f32, y: f32, mods: u32, which: MouseButton, ty: MouseType,
+        win: &MainWin)
+    {
+        if which == MouseButton::Left && ty == MouseType::Down {
+            let line = self.y_to_line(y);
+            let col = 0;  // TODO
+            let params = json!({
+                "ty": "point_select",
+                "line": line,
+                "col": col,
+            });
+            self.send_edit_cmd("gesture", &params, win);
+            println!("{},{} (line {}) {} {:?} {:?}", x, y, line, mods, which, ty);
+        }
+    }
+
     pub fn mouse_wheel(&mut self, delta: i32, _mods: u32, win: &MainWin) {
         // TODO: scale properly, taking SPI_GETWHEELSCROLLLINES into account
         let scroll_scaling = 0.5;
@@ -377,8 +396,7 @@ impl EditView {
         let viewport = first_line..last_line;
         if viewport != self.viewport {
             self.viewport = viewport;
-            let view_id = &self.view_id;
-            win.send_edit_cmd("scroll", &json!([first_line, last_line]), view_id);
+            self.send_edit_cmd("scroll", &json!([first_line, last_line]), win);
         }
     }
 
