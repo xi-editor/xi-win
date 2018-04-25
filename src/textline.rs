@@ -21,13 +21,17 @@ use directwrite::text_layout;
 
 use xi_win_shell::util::default_text_options;
 
-use linecache::Line;
+use linecache::{Line, StyleSpan};
 
 pub struct TextLine {
     layout: TextLayout,
-    // This is in utf-16 code units. Can make the case it should be floats so we
-    // don't have to re-measure in draw_cursor, but whatever.
+    /// This is in utf-16 code units. Can make the case it should be floats so we
+    /// don't have to re-measure in draw_cursor, but whatever.
     cursor: Vec<usize>,
+
+    /// Style spans (internally in utf-16 code units). Arguably could be resolved
+    /// to floats.
+    styles: Vec<StyleSpan>,
 }
 
 impl TextLine {
@@ -42,11 +46,21 @@ impl TextLine {
             .height(1e6)
             .build().unwrap();
         let layout = factory.create(params).unwrap();
-        let cursor = line.cursor().iter().map(|&offset_utf8|
-            count_utf16(&text[..offset_utf8])).collect();
         TextLine {
             layout,
-            cursor,
+            cursor: line.cursor().to_owned(),
+            styles: line.styles().to_vec(),
+        }
+    }
+
+    pub fn draw_bg(&self, rt: &mut RenderTarget, x: f32, y: f32, bg: &brush::SolidColor) {
+        for style in &self.styles {
+            if let (Some(start), Some(end)) =
+                (self.layout.hit_test_text_position(style.range.start as u32, true),
+                 self.layout.hit_test_text_position(style.range.end as u32, true))
+            {
+                rt.fill_rectangle(&(x + start.point_x, y, x + end.point_x, y + 17.0).into(), bg);
+            }
         }
     }
 
@@ -63,8 +77,8 @@ impl TextLine {
         for &offset in &self.cursor {
             if let Some(pos) = self.layout.hit_test_text_position(offset as u32, true) {
                 let xc = x + pos.point_x;
-                rt.draw_line(&((xc, y)).into(),
-                    &((xc, y + 17.0)).into(),
+                rt.draw_line(&(xc, y).into(),
+                    &(xc, y + 17.0).into(),
                     fg, 1.0, None);
             }
         }
@@ -83,25 +97,15 @@ impl TextLine {
     }
 }
 
-/// Counts the number of utf-16 code units in the given string.
-fn count_utf16(s: &str) -> usize {
-    let mut utf16_count = 0;
-    for &b in s.as_bytes() {
-        if (b as i8) >= -0x40 { utf16_count += 1; }
-        if b >= 0xf0 { utf16_count += 1; }
-    }
-    utf16_count
-}
-
 /// Convert utf-16 code unit offset to utf-8 code unit offset.
 fn conv_utf16_to_utf8_offset(s: &str, utf16_offset: usize) -> usize {
     let mut utf16_count = 0;
     for (i, &b) in s.as_bytes().iter().enumerate() {
-        if utf16_count == utf16_offset {
-            return i;
-        }
         if (b as i8) >= -0x40 { utf16_count += 1; }
         if b >= 0xf0 { utf16_count += 1; }
+        if utf16_count > utf16_offset {
+            return i;
+        }
     }
     s.len()
 }

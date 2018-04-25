@@ -15,12 +15,21 @@
 //! The line cache (text, styles and cursors for a view).
 
 use std::mem;
-
+use std::ops::Range;
 use serde_json::Value;
 
 pub struct Line {
     text: String,
+    /// List of carets, in units of utf-16 code units.
     cursor: Vec<usize>,
+    styles: Vec<StyleSpan>,
+}
+
+#[derive(Debug, Clone)]
+pub struct StyleSpan {
+    pub style_id: usize,
+    /// Range of span, in units of utf-16 code units
+    pub range: Range<usize>,
 }
 
 impl Line {
@@ -29,11 +38,29 @@ impl Line {
         let mut cursor = Vec::new();
         if let Some(arr) = v["cursor"].as_array() {
             for c in arr {
-                // TODO: this is probably the best place to convert to utf-16
-                cursor.push(c.as_u64().unwrap() as usize);
+                let offset_utf8 = c.as_u64().unwrap() as usize;
+                cursor.push(count_utf16(&text[..offset_utf8]));
             }
         }
-        Line { text, cursor }
+        let mut styles = Vec::new();
+        if let Some(arr) = v["styles"].as_array() {
+            let mut ix: i64 = 0;
+            for triple in arr.chunks(3) {
+                let start = ix + triple[0].as_i64().unwrap();
+                let end = start + triple[1].as_i64().unwrap();
+                // TODO: count utf from last end, if <=
+                let start_utf16 = count_utf16(&text[..start as usize]);
+                let end_utf16 = start_utf16 + count_utf16(&text[start as usize .. end as usize]);
+                let style_id = triple[2].as_u64().unwrap() as usize;
+                let style_span = StyleSpan {
+                    style_id,
+                    range: start_utf16..end_utf16,
+                };
+                styles.push(style_span);
+                ix = end;
+            }
+        }
+        Line { text, cursor, styles }
     }
 
     pub fn text(&self) -> &str {
@@ -42,6 +69,10 @@ impl Line {
 
     pub fn cursor(&self) -> &[usize] {
         &self.cursor
+    }
+
+    pub fn styles(&self) -> &[StyleSpan] {
+        &self.styles
     }
 }
 
@@ -100,4 +131,14 @@ impl LineCache {
             None
         }
     }
+}
+
+/// Counts the number of utf-16 code units in the given string.
+fn count_utf16(s: &str) -> usize {
+    let mut utf16_count = 0;
+    for &b in s.as_bytes() {
+        if (b as i8) >= -0x40 { utf16_count += 1; }
+        if b >= 0xf0 { utf16_count += 1; }
+    }
+    utf16_count
 }

@@ -50,6 +50,7 @@ pub struct EditView {
 struct Resources {
     fg: brush::SolidColor,
     bg: brush::SolidColor,
+    sel: brush::SolidColor,
     text_format: TextFormat,
 }
 
@@ -81,6 +82,7 @@ impl EditView {
         Resources {
             fg: rt.create_solid_color_brush(0xf0f0ea, &BrushProperties::default()).unwrap(),
             bg: rt.create_solid_color_brush(0x272822, &BrushProperties::default()).unwrap(),
+            sel: rt.create_solid_color_brush(0x49483e, &BrushProperties::default()).unwrap(),
             text_format: text_format,
         }
     }
@@ -111,6 +113,13 @@ impl EditView {
         let last_line = min(self.y_to_line(self.size.1) + 1, self.line_cache.height());
 
         let x0 = LEFT_PAD;
+        let mut y = self.line_to_content_y(first_line) - self.scroll_offset;
+        for line_num in first_line..last_line {
+            if let Some(textline) = self.get_text_line(line_num) {
+                textline.draw_bg(rt, x0, y, &resources.sel);
+            }
+            y += LINE_SPACE;
+        }
         let mut y = self.line_to_content_y(first_line) - self.scroll_offset;
         for line_num in first_line..last_line {
             if let Some(textline) = self.get_text_line(line_num) {
