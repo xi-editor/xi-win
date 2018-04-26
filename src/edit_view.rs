@@ -23,17 +23,16 @@ use winapi::um::winuser::*;
 
 use direct2d::brush;
 use direct2d::math::*;
-use directwrite::{self, TextFormat, TextLayout};
+use directwrite::{self, TextFormat};
 use directwrite::text_format;
-use directwrite::text_layout;
 
 use xi_win_shell::paint::PaintCtx;
-use xi_win_shell::util::default_text_options;
-use xi_win_shell::window::{M_ALT, M_CTRL, M_SHIFT};
+use xi_win_shell::window::{M_ALT, M_CTRL, M_SHIFT, MouseButton, MouseType};
 
 use MainWin;
 
 use linecache::LineCache;
+use textline::TextLine;
 
 /// State and behavior for one editor view.
 pub struct EditView {
@@ -55,6 +54,7 @@ struct Resources {
 }
 
 const TOP_PAD: f32 = 6.0;
+const LEFT_PAD: f32 = 6.0;
 const LINE_SPACE: f32 = 17.0;
 
 impl EditView {
@@ -110,28 +110,23 @@ impl EditView {
         let first_line = self.y_to_line(0.0);
         let last_line = min(self.y_to_line(self.size.1) + 1, self.line_cache.height());
 
-        let x0 = 6.0;
+        let x0 = LEFT_PAD;
         let mut y = self.line_to_content_y(first_line) - self.scroll_offset;
         for line_num in first_line..last_line {
-            if let Some(line) = self.line_cache.get_line(line_num) {
-                let layout = resources.create_text_layout(&self.dwrite_factory, line.text());
-                rt.draw_text_layout(
-                    &Point2F::from((x0, y)),
-                    &layout,
-                    &resources.fg,
-                    default_text_options()
-                );
-                for &offset in line.cursor() {
-                    if let Some(pos) = layout.hit_test_text_position(offset as u32, true) {
-                        let x = x0 + pos.point_x;
-                        rt.draw_line(&Point2F::from((x, y)),
-                            &Point2F::from((x, y + 17.0)),
-                            &resources.fg, 1.0, None);
-                    }
-                }
+            if let Some(textline) = self.get_text_line(line_num) {
+                textline.draw_text(rt, x0, y, &resources.fg);
+                textline.draw_cursor(rt, x0, y, &resources.fg);
             }
             y += LINE_SPACE;
         }
+    }
+
+    // signature will change when we start caching
+    fn get_text_line(&self, line_num: usize) -> Option<TextLine> {
+        self.line_cache.get_line(line_num).map(|line| {
+            let format = &self.resources.as_ref().unwrap().text_format;
+            TextLine::create_from_line(&line, &self.dwrite_factory, format)
+        })
     }
 
     pub fn set_view_id(&mut self, view_id: &str) {
@@ -144,19 +139,22 @@ impl EditView {
     }
 
     pub fn char(&self, ch: u32, _mods: u32, win: &MainWin) {
-        let view_id = &self.view_id;
         if let Some(c) = ::std::char::from_u32(ch) {
             if ch >= 0x20 {
                 // Don't insert control characters
                 let params = json!({"chars": c.to_string()});
-                win.send_edit_cmd("insert", &params, view_id);
+                self.send_edit_cmd("insert", &params, win);
             }
         }
     }
 
+    fn send_edit_cmd(&self, method: &str, params: &Value, win: &MainWin) {
+        win.send_edit_cmd(method, params, &self.view_id);
+    }
+
     /// Sends a simple action with no parameters
     fn send_action(&self, method: &str, win: &MainWin) {
-        win.send_edit_cmd(method, &json!([]), &self.view_id);
+        self.send_edit_cmd(method, &json!([]), win);
     }
 
     pub fn keydown(&mut self, vk_code: i32, mods: u32, win: &MainWin) -> bool {
@@ -339,6 +337,21 @@ impl EditView {
         self.send_action("select_all", win);
     }
 
+    pub fn mouse(&self, x: f32, y: f32, mods: u32, which: MouseButton, ty: MouseType,
+        win: &MainWin)
+    {
+        if which == MouseButton::Left && ty == MouseType::Down {
+            let (line, col) = self.xy_to_line_col(x, y);
+            let params = json!({
+                "ty": "point_select",
+                "line": line,
+                "col": col,
+            });
+            self.send_edit_cmd("gesture", &params, win);
+            println!("{},{} (line {}) {} {:?} {:?}", x, y, line, mods, which, ty);
+        }
+    }
+
     pub fn mouse_wheel(&mut self, delta: i32, _mods: u32, win: &MainWin) {
         // TODO: scale properly, taking SPI_GETWHEELSCROLLLINES into account
         let scroll_scaling = 0.5;
@@ -366,6 +379,19 @@ impl EditView {
         min(line, self.line_cache.height())
     }
 
+    /// Takes x, y in screen-space px, returns line number and utf8 offset within line.
+    fn xy_to_line_col(&self, x: f32, y: f32) -> (usize, usize) {
+        let line_num = self.y_to_line(y);
+        let col = if let (Some(textline), Some(line)) =
+            (self.get_text_line(line_num), self.line_cache.get_line(line_num))
+        {
+            textline.hit_test(x - LEFT_PAD, 0.0, line.text())
+        } else {
+            0
+        };
+        (line_num, col)
+    }
+
     /// Convert line number to y coordinate in content space.
     fn line_to_content_y(&self, line: usize) -> f32 {
         TOP_PAD + (line as f32) * LINE_SPACE
@@ -377,8 +403,7 @@ impl EditView {
         let viewport = first_line..last_line;
         if viewport != self.viewport {
             self.viewport = viewport;
-            let view_id = &self.view_id;
-            win.send_edit_cmd("scroll", &json!([first_line, last_line]), view_id);
+            self.send_edit_cmd("scroll", &json!([first_line, last_line]), win);
         }
     }
 
@@ -396,16 +421,4 @@ impl EditView {
 // Helper function for choosing between normal and shifted action
 fn s<'a>(mods: u32, normal: &'a str, shifted: &'a str) -> &'a str {
     if (mods & M_SHIFT) != 0 { shifted } else { normal }
-}
-
-impl Resources {
-    fn create_text_layout(&self, factory: &directwrite::Factory, text: &str) -> TextLayout {
-        let params = text_layout::ParamBuilder::new()
-            .text(text)
-            .font(self.text_format.clone())
-            .width(1e6)
-            .height(1e6)
-            .build().unwrap();
-        factory.create(params).unwrap()
-    }
 }
