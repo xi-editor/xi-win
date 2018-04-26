@@ -21,10 +21,11 @@ use serde_json::Value;
 
 use winapi::um::winuser::*;
 
-use direct2d::brush;
+use direct2d::brush::SolidColorBrush;
 use direct2d::math::*;
-use directwrite::{self, TextFormat};
-use directwrite::text_format;
+use direct2d::RenderTarget;
+use directwrite;
+use directwrite::TextFormat;
 
 use xi_win_shell::paint::PaintCtx;
 use xi_win_shell::window::{M_ALT, M_CTRL, M_SHIFT, MouseButton, MouseType};
@@ -48,9 +49,9 @@ pub struct EditView {
 }
 
 struct Resources {
-    fg: brush::SolidColor,
-    bg: brush::SolidColor,
-    sel: brush::SolidColor,
+    fg: SolidColorBrush,
+    bg: SolidColorBrush,
+    sel: SolidColorBrush,
     text_format: TextFormat,
 }
 
@@ -74,15 +75,15 @@ impl EditView {
 
     fn create_resources(&mut self, p: &mut PaintCtx) -> Resources {
         let rt = p.render_target();
-        let text_format_params = text_format::ParamBuilder::new()
-            .size(15.0)
-            .family("Consolas")
-            .build().unwrap();
-        let text_format = self.dwrite_factory.create(text_format_params).unwrap();
+        let text_format = TextFormat::create(&self.dwrite_factory)
+            .with_family("Consolas")
+            .with_size(15.0)
+            .build()
+            .unwrap();
         Resources {
-            fg: rt.create_solid_color_brush(0xf0f0ea, &BrushProperties::default()).unwrap(),
-            bg: rt.create_solid_color_brush(0x272822, &BrushProperties::default()).unwrap(),
-            sel: rt.create_solid_color_brush(0x49483e, &BrushProperties::default()).unwrap(),
+            fg: SolidColorBrush::create(rt).with_color(0xf0f0ea).build().unwrap(),
+            bg: SolidColorBrush::create(rt).with_color(0x272822).build().unwrap(),
+            sel: SolidColorBrush::create(rt).with_color(0x49483e).build().unwrap(),
             text_format: text_format,
         }
     }
@@ -107,7 +108,7 @@ impl EditView {
         let resources = &self.resources.as_ref().unwrap();
         let rt = p.render_target();
         let rect = RectF::from((0.0, 0.0, self.size.0, self.size.1));
-        rt.fill_rectangle(&rect, &resources.bg);
+        rt.fill_rectangle(rect, &resources.bg);
 
         let first_line = self.y_to_line(0.0);
         let last_line = min(self.y_to_line(self.size.1) + 1, self.line_cache.height());

@@ -15,9 +15,9 @@
 //! A line of styled text, as much layout information precalculated as possible.
 
 use direct2d::RenderTarget;
-use direct2d::brush;
-use directwrite::{self, TextFormat, TextLayout};
-use directwrite::text_layout;
+use direct2d::brush::SolidColorBrush;
+use directwrite;
+use directwrite::{TextFormat, TextLayout};
 
 use xi_win_shell::util::default_text_options;
 
@@ -39,13 +39,12 @@ impl TextLine {
         -> TextLine
     {
         let text = line.text();
-        let params = text_layout::ParamBuilder::new()
-            .text(text)
-            .font(format.clone())
-            .width(1e6)
-            .height(1e6)
+        let layout = TextLayout::create(factory)
+            .with_text(text)
+            .with_font(format)
+            .with_width(1e6)
+            .with_height(1e6)
             .build().unwrap();
-        let layout = factory.create(params).unwrap();
         TextLine {
             layout,
             cursor: line.cursor().to_owned(),
@@ -53,13 +52,13 @@ impl TextLine {
         }
     }
 
-    pub fn draw_bg(&self, rt: &mut RenderTarget, x: f32, y: f32, bg: &brush::SolidColor) {
+    pub fn draw_bg<R: RenderTarget>(&self, rt: &mut R, x: f32, y: f32, bg: &SolidColorBrush) {
         for style in &self.styles {
             if let (Some(start), Some(end)) =
                 (self.layout.hit_test_text_position(style.range.start as u32, true),
                  self.layout.hit_test_text_position(style.range.end as u32, true))
             {
-                rt.fill_rectangle(&(x + start.point_x, y, x + end.point_x, y + 17.0).into(), bg);
+                rt.fill_rectangle((x + start.point_x, y, x + end.point_x, y + 17.0), bg);
             }
         }
     }
@@ -68,17 +67,16 @@ impl TextLine {
     ///
     /// Note: the `fg` param will probably go away, as styles will be incorporated
     /// into the TextLine itself.
-    pub fn draw_text(&self, rt: &mut RenderTarget, x: f32, y: f32, fg: &brush::SolidColor) {
-        rt.draw_text_layout(&(x, y).into(), &self.layout, fg, default_text_options());
+    pub fn draw_text<R: RenderTarget>(&self, rt: &mut R, x: f32, y: f32, fg: &SolidColorBrush) {
+        rt.draw_text_layout((x, y), &self.layout, fg, default_text_options());
     }
 
     /// Draw the carets.
-    pub fn draw_cursor(&self, rt: &mut RenderTarget, x: f32, y: f32, fg: &brush::SolidColor) {
+    pub fn draw_cursor<R:RenderTarget>(&self, rt: &mut R, x: f32, y: f32, fg: &SolidColorBrush) {
         for &offset in &self.cursor {
             if let Some(pos) = self.layout.hit_test_text_position(offset as u32, true) {
                 let xc = x + pos.point_x;
-                rt.draw_line(&(xc, y).into(),
-                    &(xc, y + 17.0).into(),
+                rt.draw_line((xc, y), (xc, y + 17.0),
                     fg, 1.0, None);
             }
         }
