@@ -39,8 +39,9 @@ impl TextLine {
         -> TextLine
     {
         let text = line.text();
+        let trimmed_text = text.trim_right_matches(|c| c == '\r' || c == '\n');
         let layout = TextLayout::create(factory)
-            .with_text(text)
+            .with_text(trimmed_text)
             .with_font(format)
             .with_width(1e6)
             .with_height(1e6)
