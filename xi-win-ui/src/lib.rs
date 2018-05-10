@@ -212,7 +212,7 @@ impl UiState {
     }
 
     fn dispatch_events(&mut self) {
-        let event_q = mem::replace(&mut self.c.event_q, Vec::new());
+        let event_q = self.c.event_q.drain(..);
         for (id, mut event) in event_q {
             if let Some(listeners) = self.listeners.get_mut(&id) {
                 for listener in listeners {
