@@ -266,7 +266,6 @@ impl EditView {
                     "delete_backward"
                 };
                 self.send_action(action, win);
-                self.send_action("delete_forward", win);
             }
             VK_DELETE => {
                 let action = if (mods & M_CTRL) != 0 {
@@ -276,7 +275,6 @@ impl EditView {
                     "delete_forward"
                 };
                 self.send_action(action, win);
-                self.send_action("delete_forward", win);
             }
             VK_OEM_4 => {
                 // generally '[' key, but might vary on non-US keyboards
