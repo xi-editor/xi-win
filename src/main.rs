@@ -61,7 +61,7 @@ use xi_thread::start_xi_thread;
 
 use xi_win_shell::paint::PaintCtx;
 use xi_win_shell::win_main::{self, RunLoopHandle};
-use xi_win_shell::window::{IdleHandle, MouseButton, MouseType, WindowBuilder, WindowHandle,
+use xi_win_shell::window::{IdleHandle, MouseEvent, WindowBuilder, WindowHandle,
     WinHandler};
 
 struct MainWinState {
@@ -230,9 +230,9 @@ impl WinHandler for MainWinHandler {
         self.s().edit_view.keydown(vk_code, mods, &self.win)
     }
 
-    fn mouse(&self, x: i32, y: i32, mods: u32, which: MouseButton, ty: MouseType) {
-        let (x_px, y_px) = self.win.handle.borrow().pixels_to_px_xy(x, y);
-        self.s().edit_view.mouse(x_px, y_px, mods, which, ty, &self.win);
+    fn mouse(&self, event: &MouseEvent) {
+        let (x_px, y_px) = self.win.handle.borrow().pixels_to_px_xy(event.x, event.y);
+        self.s().edit_view.mouse(x_px, y_px, event.mods, event.which, event.ty, &self.win);
     }
 
     fn mouse_wheel(&self, delta: i32, mods: u32) {
