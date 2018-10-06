@@ -61,8 +61,8 @@ use xi_thread::start_xi_thread;
 
 use xi_win_shell::paint::PaintCtx;
 use xi_win_shell::win_main::{self, RunLoopHandle};
-use xi_win_shell::window::{IdleHandle, MouseEvent, WindowBuilder, WindowHandle,
-    WinHandler};
+use xi_win_shell::window::{Cursor, IdleHandle, MouseEvent, WindowBuilder,
+    WindowHandle, WinHandler};
 
 struct MainWinState {
     edit_view: EditView,
@@ -303,6 +303,7 @@ fn create_main(core: Core) -> Result<WindowHandle, Error> {
     let mut builder = WindowBuilder::new();
     builder.set_handler(Box::new(main_win_handler));
     builder.set_title("xi-editor");
+    builder.set_cursor(Cursor::IBeam);
     builder.set_menu(menubar);
     let window = builder.build().unwrap();
     Ok(window)
