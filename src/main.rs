@@ -35,6 +35,7 @@ extern crate xi_rpc;
 #[macro_use]
 extern crate xi_win_shell;
 
+mod log;
 mod dialog;
 mod edit_view;
 mod linecache;
@@ -339,6 +340,7 @@ impl Handler for MyHandler {
 }
 
 fn main() {
+    log::init();
     xi_win_shell::init();
 
     let (xi_peer, rx) = start_xi_thread();
