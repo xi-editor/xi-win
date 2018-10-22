@@ -34,6 +34,7 @@ extern crate xi_core_lib;
 extern crate xi_rpc;
 #[macro_use]
 extern crate xi_win_shell;
+extern crate xi_win_ui;
 
 mod dialog;
 mod edit_view;

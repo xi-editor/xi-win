@@ -30,6 +30,8 @@ use directwrite::TextFormat;
 use xi_win_shell::paint::PaintCtx;
 use xi_win_shell::window::{M_ALT, M_CTRL, M_SHIFT, MouseButton, MouseType};
 
+use xi_win_ui::widget::Widget;
+
 use MainWin;
 
 use linecache::LineCache;
@@ -58,6 +60,10 @@ struct Resources {
 const TOP_PAD: f32 = 6.0;
 const LEFT_PAD: f32 = 6.0;
 const LINE_SPACE: f32 = 17.0;
+
+impl Widget for EditView {
+    
+}
 
 impl EditView {
     pub fn new() -> EditView {
