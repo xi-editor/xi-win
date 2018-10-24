@@ -27,10 +27,15 @@ use direct2d::RenderTarget;
 use directwrite;
 use directwrite::TextFormat;
 
-use xi_win_shell::paint::PaintCtx;
 use xi_win_shell::window::{M_ALT, M_CTRL, M_SHIFT, MouseButton, MouseType};
 
+
+use xi_win_ui::{UiMain, UiState, UiInner};
 use xi_win_ui::widget::Widget;
+use xi_win_ui::widget::{Button, Row, Padding};
+
+use xi_win_ui::{BoxConstraints, Geometry, LayoutResult};
+use xi_win_ui::{Id, LayoutCtx, PaintCtx};
 
 use MainWin;
 
@@ -62,7 +67,51 @@ const LEFT_PAD: f32 = 6.0;
 const LINE_SPACE: f32 = 17.0;
 
 impl Widget for EditView {
-    
+    fn paint(&mut self, paint_ctx: &mut PaintCtx, geom: &Geometry) {
+        // todo: Cache resources, and flush cache when the render target is re-created.
+        let resources = self.create_resources(paint_ctx);
+        let rt = paint_ctx.render_target();
+        let rect = RectF::from((0.0, 0.0, self.size.0, self.size.1));
+        rt.fill_rectangle(rect, &resources.bg);
+
+        let first_line = self.y_to_line(0.0);
+        let last_line = min(self.y_to_line(self.size.1) + 1, self.line_cache.height());
+
+        let x0 = LEFT_PAD;
+        let mut y = self.line_to_content_y(first_line) - self.scroll_offset;
+        for line_num in first_line..last_line {
+            if let Some(textline) = self.get_text_line(line_num) {
+                textline.draw_bg(rt, x0, y, &resources.sel);
+            }
+            y += LINE_SPACE;
+        }
+        let mut y = self.line_to_content_y(first_line) - self.scroll_offset;
+        for line_num in first_line..last_line {
+            if let Some(textline) = self.get_text_line(line_num) {
+                textline.draw_text(rt, x0, y, &resources.fg);
+                textline.draw_cursor(rt, x0, y, &resources.fg);
+            }
+            y += LINE_SPACE;
+        }
+    }
+
+    fn layout(&mut self, bc: &BoxConstraints, _children: &[Id], _size: Option<(f32, f32)>,
+        _ctx: &mut LayoutCtx) -> LayoutResult
+    {
+        LayoutResult::Size(bc.constrain((0.0, 0.0)))
+    }
+
+    fn mouse(&mut self, event: &MouseEvent, ctx: &mut HandlerCtx) -> bool { false }
+
+    fn mouse_moved(&mut self, x: f32, y: f32, ctx: &mut HandlerCtx) {}
+
+    fn on_hot_changed(&mut self, hot: bool, ctx: &mut HandlerCtx) {}
+
+    fn poke(&mut self, payload: &mut Any, ctx: &mut HandlerCtx) -> bool { false }
+
+    fn key(&mut self, event: &KeyEvent, ctx: &mut HandlerCtx) -> bool { false }
+
+    fn anim_frame(&mut self, interval: u64, ctx: &mut HandlerCtx) {}
 }
 
 impl EditView {
@@ -77,6 +126,10 @@ impl EditView {
             size: (0.0, 0.0),
             viewport: 0..0,
         }
+    }
+
+    pub fn ui(self, ctx: &mut UiInner) -> Id {
+        ctx.add(self, &[])
     }
 
     fn create_resources(&mut self, p: &mut PaintCtx) -> Resources {
