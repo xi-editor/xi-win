@@ -292,6 +292,54 @@ impl MainWin {
     }
 }
 
+fn set_menu_listeners(state: &mut UiState) {
+    state.set_command_listener(|cmd, mut ctx| {
+        match cmd {
+            cmd if cmd == MenuEntries::Exit as u32 => {
+                ctx.close();
+            }
+            cmd if cmd == MenuEntries::Open as u32 => {
+
+            }
+            cmd if cmd == MenuEntries::Save as u32 => {
+                
+            }
+            cmd if cmd == MenuEntries::SaveAs as u32 => {
+                
+            }
+            cmd if cmd == MenuEntries::Undo as u32 => {
+
+            }
+            cmd if cmd == MenuEntries::Redo as u32 => {
+
+            }
+            // TODO: cut, copy, paste (requires pasteboard)
+            cmd if cmd == MenuEntries::UpperCase as u32 => {
+
+            }
+            cmd if cmd == MenuEntries::LowerCase as u32 => {
+
+            }
+            cmd if cmd == MenuEntries::Transpose as u32 => {
+
+            }
+            cmd if cmd == MenuEntries::AddCursorAbove as u32 => {
+
+            }
+            cmd if cmd == MenuEntries::AddCursorBelow as u32 => {
+
+            }
+            cmd if cmd == MenuEntries::SingleSelection as u32 => {
+
+            }
+            cmd if cmd == MenuEntries::SelectAll as u32 => {
+                
+            }
+            _ => println!("unexpected cmd {}", cmd),
+        }
+    });
+}
+
 fn create_main(core: Core) -> Result<WindowHandle, Error> {
     let main_state = MainWinState::new();
     let main_win = Rc::new(MainWin::new(core, main_state));
