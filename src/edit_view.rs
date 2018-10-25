@@ -16,6 +16,7 @@
 
 use std::cmp::min;
 use std::ops::Range;
+use std::any::Any;
 
 use serde_json::Value;
 
@@ -29,18 +30,21 @@ use directwrite::TextFormat;
 
 use xi_win_shell::window::{M_ALT, M_CTRL, M_SHIFT, MouseButton, MouseType};
 
-
-use xi_win_ui::{UiMain, UiState, UiInner};
+use xi_win_ui::UiInner;
 use xi_win_ui::widget::Widget;
-use xi_win_ui::widget::{Button, Row, Padding};
 
 use xi_win_ui::{BoxConstraints, Geometry, LayoutResult};
-use xi_win_ui::{Id, LayoutCtx, PaintCtx};
+use xi_win_ui::{HandlerCtx, Id, LayoutCtx, MouseEvent, PaintCtx, KeyEvent};
 
 use MainWin;
 
 use linecache::LineCache;
 use textline::TextLine;
+
+/// The commands the EditView widget accepts through `poke`.
+pub enum EditViewCommands {
+    
+}
 
 /// State and behavior for one editor view.
 pub struct EditView {
