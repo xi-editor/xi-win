@@ -50,7 +50,6 @@ use std::collections::HashMap;
 use winapi::shared::windef::*;
 
 use serde_json::Value;
-use serde_json::json;
 
 use edit_view::EditView;
 use menus::MenuEntries;
@@ -182,18 +181,18 @@ impl App {
         let handle = self.handle.clone();
         self.core.lock().unwrap().send_request("new_view", &params,
             move |value| {
-                let value = value.clone();
+                let view_id = value.clone().as_str().unwrap().to_string();
                 let mut state = state.lock().unwrap();
                 let handle = handle.lock().unwrap();
-                state.focused = value.to_string();
-                state.views.insert(value.to_string(), 
+                state.focused = view_id.clone();
+                state.views.insert(view_id.clone(),
                     ViewState {
                         id: 0,
                         filename: None,
                     }
                 );
                 UiMain::send_ext(&handle, edit_view, EditViewCommands::Core(core));
-                UiMain::send_ext(&handle, edit_view, EditViewCommands::ViewId(value.to_string()));
+                UiMain::send_ext(&handle, edit_view, EditViewCommands::ViewId(view_id));
             }
         );
     }
