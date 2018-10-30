@@ -21,7 +21,6 @@
 // up a file to log stdout and SetStdHandle.
 #![windows_subsystem = "windows"]
 
-#[macro_use]
 extern crate winapi;
 extern crate direct2d;
 extern crate directwrite;
@@ -36,7 +35,6 @@ extern crate xi_rpc;
 extern crate xi_win_shell;
 extern crate xi_win_ui;
 
-mod dialog;
 mod edit_view;
 mod linecache;
 mod menus;
@@ -47,14 +45,11 @@ mod xi_thread;
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 
-use winapi::shared::windef::*;
-
 use serde_json::Value;
 
 use edit_view::EditView;
 use menus::MenuEntries;
 use rpc::{Core, Handler};
-use dialog::{get_open_file_dialog_path, get_save_file_dialog_path};
 use xi_thread::start_xi_thread;
 
 use xi_win_shell::win_main::{self};
@@ -62,6 +57,7 @@ use xi_win_shell::window::{Cursor, IdleHandle, WindowBuilder};
 
 use xi_win_ui::{UiMain, UiState};
 use xi_win_ui::Id;
+use xi_win_ui::{FileDialogOptions, FileDialogType};
 
 use edit_view::EditViewCommands;
 
@@ -104,7 +100,7 @@ struct App {
 }
 
 impl App {
-    fn new(core: Core, handle: IdleHandle) -> App {
+    fn new(core: Core) -> App {
         App {
             core: Arc::new(Mutex::new(core)),
             state: Arc::new(Mutex::new(AppState::new())),
@@ -121,40 +117,6 @@ impl App {
 
         UiMain::send_ext(&focused.handle.lock().unwrap(), focused.id, cmd);
     }
-
-    fn file_open(&self, hwnd_owner: HWND) {
-        let filename = unsafe { get_open_file_dialog_path(hwnd_owner) };
-        if let Some(filename) = filename {
-            let mut state = self.get_state();
-            let mut view_state = state.get_focused_viewstate();
-
-            self.req_new_view(Some(&filename), view_state.handle.clone());
-            view_state.filename = Some(filename);
-        }
-    }
-
-    fn file_save(&self, hwnd_owner: HWND) {
-        let filename: Option<String> = self.get_state().get_focused_viewstate().filename.clone();
-        if filename.is_none() {
-            self.file_save_as(hwnd_owner);
-        } else {
-            self.send_notification("save", &json!({
-                "view_id": self.get_state().focused,
-                "file_path": filename,
-            }));
-        }
-    }
-
-    fn file_save_as(&self, hwnd_owner: HWND) {
-        if let Some(filename) = unsafe { get_save_file_dialog_path(hwnd_owner) } {
-            self.send_notification("save", &json!({
-                "view_id": self.get_state().focused,
-                "file_path": filename,
-            }));
-
-            self.get_state().get_focused_viewstate().filename = Some(filename);
-        }
-    }
 }
 
 impl App {
@@ -170,9 +132,14 @@ impl App {
 impl App {
     fn req_new_view(&self, filename: Option<&str>, handle: Arc<Mutex<IdleHandle>>) {
         let mut params = json!({});
-        if let Some(filename) = filename {
-            params["file_path"] = json!(filename);
-        }
+
+        let filename = if filename.is_some() {
+            params["file_path"] = json!(filename.unwrap());
+            Some(filename.unwrap().to_string())
+        } else {
+            None
+        };
+
         let edit_view = 0;
         let core = Arc::downgrade(&self.core);
         let state = self.state.clone();
@@ -185,7 +152,7 @@ impl App {
                 state.views.insert(view_id.clone(),
                     ViewState {
                         id: 0,
-                        filename: None,
+                        filename: filename.clone(),
                         handle: handle.clone(),
                     }
                 );
@@ -233,13 +200,58 @@ impl AppDispatcher {
                     ctx.close();
                 }
                 cmd if cmd == MenuEntries::Open as u32 => {
-                    
+                    if let Some(app) = app.lock().unwrap().as_ref() {
+                        let filename = ctx.file_dialog(FileDialogType::Open, FileDialogOptions::default());
+                        if filename.is_err() {
+                            return;
+                        }
+                        let filename = filename.unwrap().into_string();
+                        if filename.is_err() { // invalid unicode data
+                            return;
+                        }
+                        let filename = filename.unwrap();
+                        let mut state = app.get_state();
+                        let mut view_state = state.get_focused_viewstate();
+                        app.req_new_view(Some(&filename), view_state.handle.clone());
+                        view_state.filename = Some(filename);
+                    }
                 }
                 cmd if cmd == MenuEntries::Save as u32 => {
-                    
+                    if let Some(app) = app.lock().unwrap().as_ref() {
+                        {
+                            let mut state = app.get_state();
+                            let mut view_state = state.get_focused_viewstate();
+                            if view_state.filename.is_none() {
+                                let filename = ctx.file_dialog(FileDialogType::Save, FileDialogOptions::default());
+                                if filename.is_err() {
+                                    return;
+                                }
+                                let filename = filename.unwrap().into_string();
+                                if filename.is_err() { // invalid unicode data
+                                    return;
+                                }
+                                view_state.filename = Some(filename.unwrap());
+                            }
+                        }
+                        let state = app.get_state();
+                        let view_state = &state.views[&state.focused];
+                        app.send_notification("save", &json!({
+                            "view_id": &state.focused,
+                            "file_path": view_state.filename,
+                        }));
+                    }
                 }
                 cmd if cmd == MenuEntries::SaveAs as u32 => {
-                    
+                    if let Some(app) = app.lock().unwrap().as_ref() {
+                        let filename = ctx.file_dialog(FileDialogType::Save, FileDialogOptions::default());
+                        let filename = filename.unwrap().into_string().unwrap();
+                        app.send_notification("save", &json!({
+                            "view_id": app.get_state().focused,
+                            "file_path": filename,
+                        }));
+
+                        app.get_state().get_focused_viewstate().filename = Some(filename);
+                    }
                 }
                 cmd if cmd == MenuEntries::Undo as u32 => {
                     if let Some(app) = app.lock().unwrap().as_ref() {
@@ -330,7 +342,7 @@ fn main() {
     let window = builder.build().unwrap();
 
     let core = Core::new(xi_peer, rx, handler.clone());
-    let app = App::new(core, window.get_idle_handle().unwrap());
+    let app = App::new(core);
     handler.set_app(&app);
 
     app.send_notification("client_started", &json!({}));
