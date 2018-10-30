@@ -32,7 +32,7 @@ use directwrite::TextFormat;
 
 use xi_win_shell::window::{M_ALT, M_CTRL, M_SHIFT, MouseButton};
 
-use xi_win_ui::UiInner;
+use xi_win_ui::Ui;
 use xi_win_ui::widget::Widget;
 
 use xi_win_ui::{BoxConstraints, Geometry, LayoutResult};
@@ -235,7 +235,7 @@ impl EditView {
         }
     }
 
-    pub fn ui(self, ctx: &mut UiInner) -> Id {
+    pub fn ui(self, ctx: &mut Ui) -> Id {
         ctx.add(self, &[])
     }
 
