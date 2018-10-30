@@ -71,6 +71,7 @@ type ViewId = String;
 struct ViewState {
     id: Id,
     filename: Option<String>,
+    handle: Arc<Mutex<IdleHandle>>,
 }
 
 #[derive(Clone)]
@@ -100,7 +101,6 @@ impl AppState {
 struct App {
     core: Arc<Mutex<Core>>,
     state: Arc<Mutex<AppState>>,
-    handle: Arc<Mutex<IdleHandle>>,
 }
 
 impl App {
@@ -108,7 +108,6 @@ impl App {
         App {
             core: Arc::new(Mutex::new(core)),
             state: Arc::new(Mutex::new(AppState::new())),
-            handle: Arc::new(Mutex::new(handle)),
         }
     }
 
@@ -117,17 +116,20 @@ impl App {
     }
 
     fn send_view_cmd(&self, cmd: EditViewCommands) {
-        let focused = self.get_state().get_focused_viewstate().id;
-        let handle = self.get_handle();
+        let mut state = self.get_state();
+        let focused = state.get_focused_viewstate();
 
-        UiMain::send_ext(&handle, focused, cmd);
+        UiMain::send_ext(&focused.handle.lock().unwrap(), focused.id, cmd);
     }
 
     fn file_open(&self, hwnd_owner: HWND) {
         let filename = unsafe { get_open_file_dialog_path(hwnd_owner) };
         if let Some(filename) = filename {
-            self.req_new_view(Some(&filename));
-            self.get_state().get_focused_viewstate().filename = Some(filename);
+            let mut state = self.get_state();
+            let mut view_state = state.get_focused_viewstate();
+
+            self.req_new_view(Some(&filename), view_state.handle.clone());
+            view_state.filename = Some(filename);
         }
     }
 
@@ -163,14 +165,10 @@ impl App {
     fn get_state(&self) -> std::sync::MutexGuard<'_, AppState, > {
         self.state.lock().unwrap()
     }
-
-    fn get_handle(&self) -> std::sync::MutexGuard<'_, IdleHandle, > {
-        self.handle.lock().unwrap()
-    }
 }
 
 impl App {
-    fn req_new_view(&self, filename: Option<&str>) {
+    fn req_new_view(&self, filename: Option<&str>, handle: Arc<Mutex<IdleHandle>>) {
         let mut params = json!({});
         if let Some(filename) = filename {
             params["file_path"] = json!(filename);
@@ -178,21 +176,21 @@ impl App {
         let edit_view = 0;
         let core = Arc::downgrade(&self.core);
         let state = self.state.clone();
-        let handle = self.handle.clone();
         self.core.lock().unwrap().send_request("new_view", &params,
             move |value| {
                 let view_id = value.clone().as_str().unwrap().to_string();
                 let mut state = state.lock().unwrap();
-                let handle = handle.lock().unwrap();
+                let handle = handle.clone();
                 state.focused = view_id.clone();
                 state.views.insert(view_id.clone(),
                     ViewState {
                         id: 0,
                         filename: None,
+                        handle: handle.clone(),
                     }
                 );
-                UiMain::send_ext(&handle, edit_view, EditViewCommands::Core(core));
-                UiMain::send_ext(&handle, edit_view, EditViewCommands::ViewId(view_id));
+                UiMain::send_ext(&handle.lock().unwrap(), edit_view, EditViewCommands::Core(core));
+                UiMain::send_ext(&handle.lock().unwrap(), edit_view, EditViewCommands::ViewId(view_id));
             }
         );
     }
@@ -336,7 +334,9 @@ fn main() {
     handler.set_app(&app);
 
     app.send_notification("client_started", &json!({}));
-    app.req_new_view(None);
+
+    let handle = Arc::new(Mutex::new(window.get_idle_handle().unwrap()));
+    app.req_new_view(None, handle);
 
     window.show();
     runloop.run();
