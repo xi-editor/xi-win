@@ -44,95 +44,101 @@ mod rpc;
 mod textline;
 mod xi_thread;
 
-use std::any::Any;
-use std::cell::{RefCell, RefMut};
-use std::rc::Rc;
 use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
 
 use winapi::shared::windef::*;
 
 use serde_json::Value;
+use serde_json::json;
 
 use edit_view::EditView;
 use menus::MenuEntries;
 use rpc::{Core, Handler};
-use xi_win_shell::util::Error;
 use dialog::{get_open_file_dialog_path, get_save_file_dialog_path};
 use xi_thread::start_xi_thread;
 
-use xi_win_shell::paint::PaintCtx;
-use xi_win_shell::win_main::{self, RunLoopHandle};
-use xi_win_shell::window::{Cursor, IdleHandle, MouseEvent, WindowBuilder,
-    WindowHandle, WinHandler};
+use xi_win_shell::win_main::{self};
+use xi_win_shell::window::{Cursor, IdleHandle, WindowBuilder};
 
-struct MainWinState {
-    edit_view: EditView,
+use xi_win_ui::{UiMain, UiState};
+use xi_win_ui::Id;
+
+use edit_view::EditViewCommands;
+
+type ViewId = String;
+
+#[derive(Clone)]
+struct ViewState {
+    id: Id,
+    filename: Option<String>,
 }
 
-impl MainWinState {
-    fn new() -> MainWinState {
-        MainWinState {
-            edit_view: EditView::new(),
+#[derive(Clone)]
+struct AppState {
+    focused: ViewId,
+    views: HashMap<ViewId, ViewState>,
+}
+
+impl AppState {
+    fn new() -> AppState {
+        AppState {
+            focused: Default::default(),
+            views: HashMap::new(),
         }
     }
 
-    fn render(&mut self, p: &mut PaintCtx) {
-        self.edit_view.render(p);
+    fn get_focused_viewstate(&mut self) -> &mut ViewState {
+        if let Some(state) = self.views.get_mut(&self.focused) {
+            return state
+        } else {
+            panic!("Getting viewstate failed.\nFocused: {}\n", &self.focused)
+        }
     }
 }
 
-struct MainWinHandler {
-    win: Rc<MainWin>,
+#[derive(Clone)]
+struct App {
+    core: Arc<Mutex<Core>>,
+    state: Arc<Mutex<AppState>>,
+    handle: Arc<Mutex<IdleHandle>>,
 }
 
-// Maybe combine all this, put as a single item inside a RefCell.
-pub struct MainWin {
-    core: RefCell<Core>,
-    handle: RefCell<WindowHandle>,
-    state: RefCell<MainWinState>,
-}
-
-impl MainWin {
-    fn new(core: Core, state: MainWinState) -> MainWin {
-        MainWin {
-            core: RefCell::new(core),
-            handle: Default::default(),
-            state: RefCell::new(state),
+impl App {
+    fn new(core: Core, handle: IdleHandle) -> App {
+        App {
+            core: Arc::new(Mutex::new(core)),
+            state: Arc::new(Mutex::new(AppState::new())),
+            handle: Arc::new(Mutex::new(handle)),
         }
     }
 
     fn send_notification(&self, method: &str, params: &Value) {
-        self.core.borrow().send_notification(method, params);
+        self.get_core().send_notification(method, params);
     }
 
-    // Note: caller can't be borrowing the state.
-    fn send_edit_cmd(&self, method: &str, params: &Value, view_id: &str) {
-        let edit_params = json!({
-            "method": method,
-            "params": params,
-            "view_id": view_id,
-        });
-        self.send_notification("edit", &edit_params);
+    fn send_view_cmd(&self, cmd: EditViewCommands) {
+        let focused = self.get_state().get_focused_viewstate().id;
+        let handle = self.get_handle();
+
+        UiMain::send_ext(&handle, focused, cmd);
     }
 
     fn file_open(&self, hwnd_owner: HWND) {
         let filename = unsafe { get_open_file_dialog_path(hwnd_owner) };
         if let Some(filename) = filename {
             self.req_new_view(Some(&filename));
-            let mut state = self.state.borrow_mut();
-            state.edit_view.filename = Some(filename);
-            state.edit_view.clear_line_cache();
+            self.get_state().get_focused_viewstate().filename = Some(filename);
         }
     }
 
     fn file_save(&self, hwnd_owner: HWND) {
-        let filename: Option<String> = self.state.borrow_mut().edit_view.filename.clone();
+        let filename: Option<String> = self.get_state().get_focused_viewstate().filename.clone();
         if filename.is_none() {
             self.file_save_as(hwnd_owner);
         } else {
-            let state = self.state.borrow_mut();
             self.send_notification("save", &json!({
-                "view_id": state.edit_view.view_id,
+                "view_id": self.get_state().focused,
                 "file_path": filename,
             }));
         }
@@ -140,251 +146,170 @@ impl MainWin {
 
     fn file_save_as(&self, hwnd_owner: HWND) {
         if let Some(filename) = unsafe { get_save_file_dialog_path(hwnd_owner) } {
-            let mut state = self.state.borrow_mut();
             self.send_notification("save", &json!({
-                "view_id": state.edit_view.view_id,
+                "view_id": self.get_state().focused,
                 "file_path": filename,
             }));
 
-            state.edit_view.filename = Some(filename.clone());
+            self.get_state().get_focused_viewstate().filename = Some(filename);
         }
     }
 }
 
-impl WinHandler for MainWinHandler {
-    fn connect(&self, handle: &WindowHandle) {
-        *self.win.handle.borrow_mut() = handle.clone();
-        self.win.send_notification("client_started", &json!({}));
-        self.win.req_new_view(None);
+impl App {
+    fn get_core(&self) -> std::sync::MutexGuard<'_, rpc::Core, > {
+        self.core.lock().unwrap()
     }
 
-    fn size(&self, x: u32, y: u32) {
-        let (x_px, y_px) = self.win.handle.borrow().pixels_to_px_xy(x, y);
-        self.s().edit_view.size(x_px, y_px);
+    fn get_state(&self) -> std::sync::MutexGuard<'_, AppState, > {
+        self.state.lock().unwrap()
     }
 
-    fn paint(&self, paint_ctx: &mut PaintCtx) -> bool {
-        self.s().render(paint_ctx);
-        false
-    }
-
-    fn rebuild_resources(&self) {
-        self.s().edit_view.rebuild_resources();
-    }
-
-    fn command(&self, id: u32) {
-        match id {
-            x if x == MenuEntries::Exit as u32 => {
-                self.win.handle.borrow().close();
-            }
-            x if x == MenuEntries::Open as u32 => {
-                let hwnd = self.win.handle.borrow().get_hwnd().unwrap();
-                self.win.file_open(hwnd);
-            }
-            x if x == MenuEntries::Save as u32 => {
-                let hwnd = self.win.handle.borrow().get_hwnd().unwrap();
-                self.win.file_save(hwnd);
-            }
-            x if x == MenuEntries::SaveAs as u32 => {
-                let hwnd = self.win.handle.borrow().get_hwnd().unwrap();
-                self.win.file_save_as(hwnd);
-            }
-
-            x if x == MenuEntries::Undo as u32 => {
-                self.s().edit_view.undo(&self.win);
-            }
-            x if x == MenuEntries::Redo as u32 => {
-                self.s().edit_view.redo(&self.win);
-            }
-            // TODO: cut, copy, paste (requires pasteboard)
-            x if x == MenuEntries::UpperCase as u32 => {
-                self.s().edit_view.upper_case(&self.win);
-            }
-            x if x == MenuEntries::LowerCase as u32 => {
-                self.s().edit_view.lower_case(&self.win);
-            }
-            x if x == MenuEntries::Transpose as u32 => {
-                self.s().edit_view.transpose(&self.win);
-            }
-
-            x if x == MenuEntries::AddCursorAbove as u32 => {
-                self.s().edit_view.add_cursor_above(&self.win);
-            }
-            x if x == MenuEntries::AddCursorBelow as u32 => {
-                self.s().edit_view.add_cursor_below(&self.win);
-            }
-            x if x == MenuEntries::SingleSelection as u32 => {
-                self.s().edit_view.single_selection(&self.win);
-            }
-            x if x == MenuEntries::SelectAll as u32 => {
-                self.s().edit_view.select_all(&self.win);
-            }
-            _ => println!("unexpected id {}", id),
-        }
-    }
-
-    fn char(&self, ch: u32, mods: u32) {
-        self.s().edit_view.char(ch, mods, &self.win);
-    }
-
-    fn keydown(&self, vk_code: i32, mods: u32) -> bool {
-        self.s().edit_view.keydown(vk_code, mods, &self.win)
-    }
-
-    fn mouse(&self, event: &MouseEvent) {
-        let (x_px, y_px) = self.win.handle.borrow().pixels_to_px_xy(event.x, event.y);
-        self.s().edit_view.mouse(x_px, y_px, event.mods, event.which, event.ty, &self.win);
-    }
-
-    fn mouse_wheel(&self, delta: i32, mods: u32) {
-        self.s().edit_view.mouse_wheel(delta, mods, &self.win)
-    }
-
-    fn destroy(&self) {
-        win_main::request_quit();
-    }
-
-    fn as_any(&self) -> &Any { self }
-}
-
-impl MainWinHandler {
-    /// Convenience function for accessing state.
-    fn s(&self) -> RefMut<MainWinState> {
-        self.win.state.borrow_mut()
+    fn get_handle(&self) -> std::sync::MutexGuard<'_, IdleHandle, > {
+        self.handle.lock().unwrap()
     }
 }
 
-impl MainWin {
+impl App {
     fn req_new_view(&self, filename: Option<&str>) {
         let mut params = json!({});
         if let Some(filename) = filename {
             params["file_path"] = json!(filename);
         }
-        let handle = self.handle.borrow().get_idle_handle().unwrap();
-        self.core.borrow_mut().send_request("new_view", &params,
+        let edit_view = 0;
+        let core = Arc::downgrade(&self.core);
+        let state = self.state.clone();
+        let handle = self.handle.clone();
+        self.core.lock().unwrap().send_request("new_view", &params,
             move |value| {
                 let value = value.clone();
-                handle.add_idle(move |a| {
-                    let handler = a.downcast_ref::<MainWinHandler>().unwrap();
-                    let edit_view = &mut handler.win.state.borrow_mut().edit_view;
-                    edit_view.set_view_id(value.as_str().unwrap());
-                });
+                let mut state = state.lock().unwrap();
+                let handle = handle.lock().unwrap();
+                state.focused = value.to_string();
+                state.views.insert(value.to_string(), 
+                    ViewState {
+                        id: 0,
+                        filename: None,
+                    }
+                );
+                UiMain::send_ext(&handle, edit_view, EditViewCommands::Core(core));
+                UiMain::send_ext(&handle, edit_view, EditViewCommands::ViewId(value.to_string()));
             }
         );
     }
 
     fn handle_cmd(&self, method: &str, params: &Value) {
-        let mut state = self.state.borrow_mut();
         match method {
-            "update" => state.edit_view.apply_update(&params["update"]),
-            "scroll_to" => state.edit_view.scroll_to(params["line"].as_u64().unwrap() as usize),
+            "update" => self.send_view_cmd(EditViewCommands::ApplyUpdate(params["update"].clone())),
+            "scroll_to" => self.send_view_cmd(EditViewCommands::ScrollTo(params["line"].as_u64().unwrap() as usize)),
             "available_themes" => (), // TODO
             "available_plugins" => (), // TODO
+            "available_languages" => (), // TODO
             "config_changed" => (), // TODO
+            "language_changed" => (), // TODO
             _ => println!("unhandled core->fe method {}", method),
         }
-        // TODO: edit view should probably handle this logic
-        self.invalidate();
     }
-
-    pub fn invalidate(&self) {
-        self.handle.borrow().invalidate();
-    }
-}
-
-fn set_menu_listeners(state: &mut UiState) {
-    state.set_command_listener(|cmd, mut ctx| {
-        match cmd {
-            cmd if cmd == MenuEntries::Exit as u32 => {
-                ctx.close();
-            }
-            cmd if cmd == MenuEntries::Open as u32 => {
-
-            }
-            cmd if cmd == MenuEntries::Save as u32 => {
-                
-            }
-            cmd if cmd == MenuEntries::SaveAs as u32 => {
-                
-            }
-            cmd if cmd == MenuEntries::Undo as u32 => {
-
-            }
-            cmd if cmd == MenuEntries::Redo as u32 => {
-
-            }
-            // TODO: cut, copy, paste (requires pasteboard)
-            cmd if cmd == MenuEntries::UpperCase as u32 => {
-
-            }
-            cmd if cmd == MenuEntries::LowerCase as u32 => {
-
-            }
-            cmd if cmd == MenuEntries::Transpose as u32 => {
-
-            }
-            cmd if cmd == MenuEntries::AddCursorAbove as u32 => {
-
-            }
-            cmd if cmd == MenuEntries::AddCursorBelow as u32 => {
-
-            }
-            cmd if cmd == MenuEntries::SingleSelection as u32 => {
-
-            }
-            cmd if cmd == MenuEntries::SelectAll as u32 => {
-                
-            }
-            _ => println!("unexpected cmd {}", cmd),
-        }
-    });
-}
-
-fn create_main(core: Core) -> Result<WindowHandle, Error> {
-    let main_state = MainWinState::new();
-    let main_win = Rc::new(MainWin::new(core, main_state));
-    let main_win_handler = MainWinHandler {
-        win: main_win,
-    };
-
-    let menubar = menus::create_menus();
-
-    let mut builder = WindowBuilder::new();
-    builder.set_handler(Box::new(main_win_handler));
-    builder.set_title("xi-editor");
-    builder.set_cursor(Cursor::IBeam);
-    builder.set_menu(menubar);
-    let window = builder.build().unwrap();
-    Ok(window)
 }
 
 #[derive(Clone)]
-struct MyHandler {
-    runloop: RunLoopHandle,
-    win_handle: Arc<Mutex<Option<IdleHandle>>>,
+struct AppDispatcher {
+    app: Arc<Mutex<Option<App>>>,
 }
 
-impl MyHandler {
-    fn new(runloop: RunLoopHandle) -> MyHandler {
-        MyHandler {
-            runloop,
-            win_handle: Default::default(),
+impl AppDispatcher {
+    fn new() -> AppDispatcher {
+        AppDispatcher {
+            app: Default::default(),
         }
+    }
+
+    fn set_app(&mut self, app: &App) {
+        *self.app.lock().unwrap() = Some(app.clone());
+    }
+
+    fn set_menu_listeners(&self, state: &mut UiState) {
+        let app = self.app.clone();
+        state.set_command_listener(move |cmd, mut ctx| {            
+            match cmd {
+                cmd if cmd == MenuEntries::Exit as u32 => {
+                    ctx.close();
+                }
+                cmd if cmd == MenuEntries::Open as u32 => {
+                    
+                }
+                cmd if cmd == MenuEntries::Save as u32 => {
+                    
+                }
+                cmd if cmd == MenuEntries::SaveAs as u32 => {
+                    
+                }
+                cmd if cmd == MenuEntries::Undo as u32 => {
+                    if let Some(app) = app.lock().unwrap().as_ref() {
+                        app.send_view_cmd(EditViewCommands::Undo);
+                    }
+                }
+                cmd if cmd == MenuEntries::Redo as u32 => {
+                    if let Some(app) = app.lock().unwrap().as_ref() {
+                        app.send_view_cmd(EditViewCommands::Redo);
+                    }
+                }
+                // TODO: cut, copy, paste (requires pasteboard)
+                cmd if cmd == MenuEntries::UpperCase as u32 => {
+                    if let Some(app) = app.lock().unwrap().as_ref() {
+                        app.send_view_cmd(EditViewCommands::UpperCase);
+                    }
+                }
+                cmd if cmd == MenuEntries::LowerCase as u32 => {
+                    if let Some(app) = app.lock().unwrap().as_ref() {
+                        app.send_view_cmd(EditViewCommands::LowerCase);
+                    }
+                }
+                cmd if cmd == MenuEntries::Transpose as u32 => {
+                    if let Some(app) = app.lock().unwrap().as_ref() {
+                        app.send_view_cmd(EditViewCommands::Transpose);
+                    }
+                }
+                cmd if cmd == MenuEntries::AddCursorAbove as u32 => {
+                    if let Some(app) = app.lock().unwrap().as_ref() {
+                        app.send_view_cmd(EditViewCommands::AddCursorAbove);
+                    }
+                }
+                cmd if cmd == MenuEntries::AddCursorBelow as u32 => {
+                    if let Some(app) = app.lock().unwrap().as_ref() {
+                        app.send_view_cmd(EditViewCommands::AddCursorBelow);
+                    }
+                }
+                cmd if cmd == MenuEntries::SingleSelection as u32 => {
+                    if let Some(app) = app.lock().unwrap().as_ref() {
+                        app.send_view_cmd(EditViewCommands::SingleSelection);
+                    }
+                }
+                cmd if cmd == MenuEntries::SelectAll as u32 => {
+                    if let Some(app) = app.lock().unwrap().as_ref() {
+                        app.send_view_cmd(EditViewCommands::SelectAll);
+                    }
+                }
+                _ => println!("unexpected cmd {}", cmd),
+            }
+        });
     }
 }
 
-impl Handler for MyHandler {
+impl Handler for AppDispatcher {
     fn notification(&self, method: &str, params: &Value) {
-        if let Some(idle_handle) = self.win_handle.lock().unwrap().as_ref() {
-            // Note: could pass these by ownership, but we'll change where they get parsed.
-            let method = method.to_owned();
-            let params = params.clone();
-            idle_handle.add_idle(move |a| {
-                let handler = a.downcast_ref::<MainWinHandler>().unwrap();
-                handler.win.handle_cmd(&method, &params);
-            });
+        println!("core->fe: {} {}", method, params);
+        if let Some(ref app) = *self.app.lock().unwrap() {
+            app.handle_cmd(method, params);
         }
     }
+}
+
+fn build_app(state: &mut UiState) {
+    // todo: widgets which support tabs and split panes
+    let edit_view = EditView::new().ui(state);
+    state.set_root(edit_view);
+    state.set_focus(Some(edit_view));
 }
 
 fn main() {
@@ -392,12 +317,28 @@ fn main() {
 
     let (xi_peer, rx) = start_xi_thread();
 
+    let mut handler = AppDispatcher::new();
     let mut runloop = win_main::RunLoop::new();
+    let mut builder = WindowBuilder::new();
+    let mut state = UiState::new();
+
+    handler.set_menu_listeners(&mut state);
+    build_app(&mut state);
     menus::set_accel(&mut runloop);
-    let handler = MyHandler::new(runloop.get_handle());
+
+    builder.set_handler(Box::new(UiMain::new(state)));
+    builder.set_title("xi-editor");
+    builder.set_cursor(Cursor::IBeam);
+    builder.set_menu(menus::create_menus());
+    let window = builder.build().unwrap();
+
     let core = Core::new(xi_peer, rx, handler.clone());
-    let window = create_main(core).unwrap();
-    *handler.win_handle.lock().unwrap() = window.get_idle_handle();
+    let app = App::new(core, window.get_idle_handle().unwrap());
+    handler.set_app(&app);
+
+    app.send_notification("client_started", &json!({}));
+    app.req_new_view(None);
+
     window.show();
     runloop.run();
 }
