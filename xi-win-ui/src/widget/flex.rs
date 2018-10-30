@@ -17,7 +17,7 @@
 use std::collections::BTreeMap;
 
 use {BoxConstraints, LayoutResult};
-use {Id, LayoutCtx, UiInner};
+use {Id, LayoutCtx, Ui};
 use widget::Widget;
 
 pub struct Row;
@@ -125,7 +125,7 @@ impl Column {
 
 impl Flex {
     /// Add to UI with children.
-    pub fn ui(self, children: &[Id], ctx: &mut UiInner) -> Id {
+    pub fn ui(self, children: &[Id], ctx: &mut Ui) -> Id {
         ctx.add(self, children)
     }
 

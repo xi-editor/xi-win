@@ -40,6 +40,12 @@ pub mod widget;
 
 pub use widget::{KeyEvent, KeyVariant, MouseEvent, Widget};
 
+/// The top-level handler for the UI.
+///
+/// This struct ultimately has ownership of all components within the UI.
+/// It implements the `WinHandler` trait of xi-win-shell, and, after the
+/// UI is built, ownership is transferred to the window, through `set_handler`
+/// in the xi-win-shell window building sequence.
 pub struct UiMain {
     state: RefCell<UiState>,
 }
@@ -55,13 +61,15 @@ pub struct UiState {
 
     /// The widget tree and associated state is split off into a separate struct
     /// so that we can use a mutable reference to it as the listener context.
-    inner: UiInner,
+    inner: Ui,
 }
 
-/// The context given to listeners.
-///
-/// Listeners are allowed to poke widgets and mutate the graph.
-pub struct UiInner {
+/// This struct is being renamed.
+#[deprecated]
+pub type UiInner = Ui;
+
+/// The main access point for manipulating the UI.
+pub struct Ui {
     /// The individual widget trait objects.
     widgets: Vec<Box<Widget>>,
 
@@ -88,14 +96,14 @@ pub struct LayoutCtx {
     /// this is the general SOA vs AOS discussion.
     per_widget: Vec<PerWidgetState>,
 
-    /// State of animation request.
+    /// State of animation requests.
     anim_state: AnimState,
 
     /// The time of the last paint cycle.
     prev_paint_time: Option<Instant>,
 
-    /// Queue of events to distribute to listeners
-    event_q: Vec<(Id, Box<Any>)>,
+    /// Queue of events to dispatch after build or handler.
+    event_q: Vec<Event>,
 
     /// Which widget is currently focused, if any.
     focused: Option<Id>,
@@ -146,6 +154,16 @@ pub enum LayoutResult {
     RequestChild(Id, BoxConstraints),
 }
 
+enum Event {
+    /// Event to be delivered to listeners.
+    Event(Id, Box<Any>),
+
+    /// A request to add a listener.
+    AddListener(Id, Box<FnMut(&mut Any, ListenerCtx)>),
+
+    // TODO: likely an event related to widget deletion will go here.
+}
+
 // Contexts for widget methods.
 
 /// Context given to handlers.
@@ -156,10 +174,13 @@ pub struct HandlerCtx<'a> {
     c: &'a mut LayoutCtx,
 }
 
+/// The context given to listeners.
+///
+/// Listeners are allowed to poke widgets and mutate the graph.
 pub struct ListenerCtx<'a> {
     id: Id,
 
-    inner: &'a mut UiInner,
+    inner: &'a mut Ui,
 }
 
 pub struct PaintCtx<'a, 'b: 'a>  {
@@ -207,7 +228,7 @@ impl UiState {
         UiState {
             listeners: Default::default(),
             command_listener: None,
-            inner: UiInner {
+            inner: Ui {
                 widgets: Vec::new(),
                 graph: Default::default(),
                 c: LayoutCtx {
@@ -224,20 +245,6 @@ impl UiState {
                 }
             }
         }
-    }
-
-    /// Add a listener that expects a specific type.
-    pub fn add_listener<A, F>(&mut self, node: Id, mut f: F)
-        where A: Any, F: FnMut(&mut A, ListenerCtx) + 'static
-    {
-        let wrapper: Box<FnMut(&mut Any, ListenerCtx)> = Box::new(move |a, ctx| {
-            if let Some(arg) = a.downcast_mut() {
-                f(arg, ctx)
-            } else {
-                println!("type mismatch in listener arg");
-            }
-        });
-        self.listeners.entry(node).or_insert(Vec::new()).push(wrapper);
     }
 
     /// Set a listener for menu commands.
@@ -399,14 +406,21 @@ impl UiState {
     fn dispatch_events(&mut self) {
         while !self.c.event_q.is_empty() {
             let event_q = mem::replace(&mut self.c.event_q, Vec::new());
-            for (id, mut event) in event_q {
-                if let Some(listeners) = self.listeners.get_mut(&id) {
-                    for listener in listeners {
-                        let ctx = ListenerCtx {
-                            id,
-                            inner: &mut self.inner,
-                        };
-                        listener(event.deref_mut(), ctx);
+            for event in event_q {
+                match event {
+                    Event::Event(id, mut event) => {
+                        if let Some(listeners) = self.listeners.get_mut(&id) {
+                            for listener in listeners {
+                                let ctx = ListenerCtx {
+                                    id,
+                                    inner: &mut self.inner,
+                                };
+                                listener(event.deref_mut(), ctx);
+                            }
+                        }
+                    }
+                    Event::AddListener(id, listener) => {
+                        self.listeners.entry(id).or_default().push(listener);
                     }
                 }
             }
@@ -469,20 +483,20 @@ fn clamp(val: f32, min: f32, max: f32) -> f32 {
 }
 
 impl Deref for UiState {
-    type Target = UiInner;
+    type Target = Ui;
 
-    fn deref(&self) -> &UiInner {
+    fn deref(&self) -> &Ui {
         &self.inner
     }
 }
 
 impl DerefMut for UiState {
-    fn deref_mut(&mut self) -> &mut UiInner {
+    fn deref_mut(&mut self) -> &mut Ui {
         &mut self.inner
     }
 }
 
-impl UiInner {
+impl Ui {
     /// Send an arbitrary payload to a widget. The type and interpretation of the
     /// payload depends on the specific target widget.
     pub fn poke<A: Any>(&mut self, node: Id, payload: &mut A) -> bool {
@@ -515,6 +529,25 @@ impl UiInner {
     /// Set the focused widget.
     pub fn set_focus(&mut self, node: Option<Id>) {
         self.c.focused = node;
+    }
+
+    /// Add a listener that expects a specific type.
+    pub fn add_listener<A, F>(&mut self, node: Id, mut f: F)
+        where A: Any, F: FnMut(&mut A, ListenerCtx) + 'static
+    {
+        let wrapper: Box<FnMut(&mut Any, ListenerCtx)> = Box::new(move |a, ctx| {
+            if let Some(arg) = a.downcast_mut() {
+                f(arg, ctx)
+            } else {
+                println!("type mismatch in listener arg");
+            }
+        });
+        self.c.event_q.push(Event::AddListener(node, wrapper));
+    }
+
+    pub fn append_child(&mut self, node: Id, child: Id) {
+        // TODO: could do some validation of graph structure (cycles would be bad).
+        self.graph.append_child(node, child);
     }
 
     // The following methods are really UiState methods, but don't need access to listeners
@@ -615,7 +648,7 @@ impl<'a> HandlerCtx<'a> {
 
     /// Send an event, to be handled by listeners.
     pub fn send_event<A: Any>(&mut self, a: A) {
-        self.c.event_q.push((self.id, Box::new(a)));
+        self.c.event_q.push(Event::Event(self.id, Box::new(a)));
     }
 
     /// Set or unset the widget as active.
@@ -654,15 +687,15 @@ impl<'a> HandlerCtx<'a> {
 }
 
 impl<'a> Deref for ListenerCtx<'a> {
-    type Target = UiInner;
+    type Target = Ui;
 
-    fn deref(&self) -> &UiInner {
+    fn deref(&self) -> &Ui {
         self.inner
     }
 }
 
 impl<'a> DerefMut for ListenerCtx<'a> {
-    fn deref_mut(&mut self) -> &mut UiInner {
+    fn deref_mut(&mut self) -> &mut Ui {
         self.inner
     }
 }
@@ -717,7 +750,11 @@ impl<'a, 'b> PaintCtx<'a, 'b> {
 
 impl WinHandler for UiMain {
     fn connect(&self, handle: &WindowHandle) {
-        self.state.borrow_mut().c.handle = handle.clone();
+        let mut state = self.state.borrow_mut();
+        state.c.handle = handle.clone();
+
+        // Dispatch events; this is mostly to add listeners.
+        state.dispatch_events();
     }
 
     fn paint(&self, paint_ctx: &mut paint::PaintCtx) -> bool {
