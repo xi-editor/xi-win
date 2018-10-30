@@ -36,8 +36,10 @@ use xi_win_shell::paint;
 use xi_win_shell::win_main;
 use xi_win_shell::window::{self, IdleHandle, MouseType, WindowHandle, WinHandler};
 
+mod graph;
 pub mod widget;
 
+use graph::Graph;
 pub use widget::{KeyEvent, KeyVariant, MouseEvent, Widget};
 
 /// The top-level handler for the UI.
@@ -113,13 +115,6 @@ pub struct LayoutCtx {
 
     /// Which widget is hot (hovered), if any.
     hot: Option<Id>,
-}
-
-#[derive(Default)]
-struct Graph {
-    root: Id,
-    children: Vec<Vec<Id>>,
-    parent: Vec<Id>,
 }
 
 #[derive(Default, Clone, Copy)]
@@ -545,9 +540,18 @@ impl Ui {
         self.c.event_q.push(Event::AddListener(node, wrapper));
     }
 
+    /// Add a child dynamically, in the last position.
     pub fn append_child(&mut self, node: Id, child: Id) {
         // TODO: could do some validation of graph structure (cycles would be bad).
         self.graph.append_child(node, child);
+    }
+
+    /// Remove a child.
+    ///
+    /// Can panic if child is not a valid child. The child is not deleted, but
+    /// can ba added again later.
+    pub fn remove_child(&mut self, node: Id, child: Id) {
+        self.graph.remove_child(node, child);
     }
 
     // The following methods are really UiState methods, but don't need access to listeners
@@ -832,18 +836,4 @@ impl WinHandler for UiMain {
     }
 
     fn as_any(&self) -> &Any { self }
-}
-
-impl Graph {
-    pub fn alloc_node(&mut self) -> Id {
-        let id = self.children.len();
-        self.children.push(vec![]);
-        self.parent.push(id);
-        id
-    }
-
-    pub fn append_child(&mut self, parent: Id, child: Id) {
-        self.children[parent].push(child);
-        self.parent[child] = parent;
-    }
 }
