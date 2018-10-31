@@ -18,6 +18,7 @@ use std::cmp::min;
 use std::ops::Range;
 use std::any::Any;
 use std::sync::{Mutex, Weak};
+use std::cell::RefCell;
 
 use serde_json::Value;
 
@@ -59,9 +60,12 @@ pub enum EditViewCommands {
     SelectAll,
 }
 
+type Method = String;
+type Params = Value;
+
 /// State and behavior for one editor view.
 pub struct EditView {
-    view_id: String,
+    view_id: Option<String>,
     line_cache: LineCache,
     dwrite_factory: directwrite::Factory,
     resources: Option<Resources>,
@@ -69,6 +73,7 @@ pub struct EditView {
     size: (f32, f32),  // in px units
     viewport: Range<usize>,
     core: Weak<Mutex<Core>>,
+    pending: RefCell<Vec<(Method, Params)>>,
 }
 
 struct Resources {
@@ -116,7 +121,10 @@ impl Widget for EditView {
     fn layout(&mut self, bc: &BoxConstraints, _children: &[Id], _size: Option<(f32, f32)>,
         _ctx: &mut LayoutCtx) -> LayoutResult
     {
-        LayoutResult::Size(bc.constrain((0.0, 0.0)))
+        let size = bc.constrain((0.0, 0.0));
+        self.size = size;
+        self.update_viewport();
+        LayoutResult::Size(size)
     }
 
     fn mouse(&mut self, event: &MouseEvent, _ctx: &mut HandlerCtx) -> bool { 
@@ -137,7 +145,14 @@ impl Widget for EditView {
         if let Some(cmd) = payload.downcast_ref::<EditViewCommands>() {
             match cmd {
                 EditViewCommands::ViewId(view_id) => {
-                    self.view_id = view_id.to_string();
+                    self.view_id = Some(view_id.to_string());
+
+                    // // Fire off the pending notifications
+                    let mut pending = self.pending.borrow_mut();
+                    for notification in pending.drain(..) {
+                        let (method, params) = notification;
+                        self.send_edit_cmd(&method, &params);
+                    }
                 }
                 EditViewCommands::ApplyUpdate(update) => {
                     self.apply_update(&update);
@@ -198,7 +213,7 @@ impl Widget for EditView {
 impl EditView {
     pub fn new() -> EditView {
         EditView {
-            view_id: "".into(),
+            view_id: Default::default(),
             line_cache: LineCache::new(),
             dwrite_factory: directwrite::Factory::new().unwrap(),
             resources: None,
@@ -206,6 +221,7 @@ impl EditView {
             size: (0.0, 0.0),
             viewport: 0..0,
             core: Default::default(),
+            pending: Default::default(),
         }
     }
 
@@ -265,24 +281,26 @@ impl EditView {
     }
 
     fn send_edit_cmd(&self, method: &str, params: &Value) {
-        let edit_params = json!({
-            "method": method,
-            "params": params,
-            "view_id": &self.view_id,
-        });
-        self.send_notification("edit", &edit_params);
-    }
+        // TODO: When let_chains lands, this will be easier.
+        let core = self.core.upgrade();
+        if core.is_some() && self.view_id.is_some() {
+            let view_id = &self.view_id.clone().unwrap();
+            let edit_params = json!({
+                "method": method,
+                "params": params,
+                "view_id": view_id,
+            });
 
-    fn send_notification(&self, method: &str, params: &Value) {
-        if let Some(ref core) = self.core.upgrade() {
-            core.lock().unwrap().send_notification(method, params);
+            let core = core.unwrap();
+            core.lock().unwrap().send_notification("edit", &edit_params);
             // NOTE: For debugging, could be replaced by trace logging
             // println!("fe->core: {}", json!({
             //     "method": method,
             //     "params": params,
             // }));
         } else {
-            // TODO: queue pending
+            let mut pending = self.pending.borrow_mut();
+            pending.push((method.to_owned(), params.clone()));
         }
     }
 
