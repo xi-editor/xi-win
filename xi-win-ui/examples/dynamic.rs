@@ -65,6 +65,7 @@ fn main() {
                 app.count += 1;
                 let label = format!("{}", n);
                 let new_button = Button::new(label).ui(&mut ctx);
+                println!("button {} id={}", n, new_button);
                 ctx.add_listener(new_button, move |_: &mut bool, mut ctx| {
                     ctx.poke_up(&mut Action::Select(n));
                 });

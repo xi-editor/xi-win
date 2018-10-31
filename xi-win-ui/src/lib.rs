@@ -513,9 +513,15 @@ impl Ui {
         where W: Widget + 'static
     {
         let id = self.graph.alloc_node();
-        self.widgets.push(Box::new(widget));
-        self.c.geom.push(Default::default());
-        self.c.per_widget.push(Default::default());
+        if id < self.widgets.len() {
+            self.widgets[id] = Box::new(widget);
+            self.c.geom[id] = Default::default();
+            self.c.per_widget[id] = Default::default();
+        } else {
+            self.widgets.push(Box::new(widget));
+            self.c.geom.push(Default::default());
+            self.c.per_widget.push(Default::default());
+        }
         for &child in children {
             self.graph.append_child(id, child);
         }
@@ -577,6 +583,7 @@ impl Ui {
         }
         delete_rec(&mut self.widgets, &self.graph, child);
         self.remove_child(node, child);
+        self.graph.free_subtree(child);
     }
 
     // The following methods are really UiState methods, but don't need access to listeners

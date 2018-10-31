@@ -14,6 +14,8 @@
 
 //! Graph for structure for widget tree.
 
+use std::mem;
+
 use Id;
 
 #[derive(Default)]
@@ -21,10 +23,16 @@ pub struct Graph {
     pub root: Id,
     pub children: Vec<Vec<Id>>,
     pub parent: Vec<Id>,
+
+    free_list: Vec<Id>,
 }
 
 impl Graph {
+    /// Allocate a node; it might be a previously freed id.
     pub fn alloc_node(&mut self) -> Id {
+        if let Some(id) = self.free_list.pop() {
+            return id;
+        }
         let id = self.children.len();
         self.children.push(vec![]);
         self.parent.push(id);
@@ -45,5 +53,18 @@ impl Graph {
             .expect("tried to remove nonexistent child");
         self.children[parent].remove(ix);
         self.parent[child] = child;
+    }
+
+    pub fn free_subtree(&mut self, node: Id) {
+        let mut ix = self.free_list.len();
+        // This is a little tricky; we're using the free list as a queue
+        // for breadth-first traversal.
+        self.free_list.push(node);
+        while ix < self.free_list.len() {
+            let node = self.free_list[ix];
+            ix += 1;
+            self.parent[node] = node;
+            self.free_list.extend(mem::replace(&mut self.children[node], Vec::new()));
+        }
     }
 }
