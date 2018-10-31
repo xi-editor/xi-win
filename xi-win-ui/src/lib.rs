@@ -558,10 +558,16 @@ impl Ui {
         self.c.request_layout();
     }
 
+    /// Add a child dynamically, before the given sibling.
+    pub fn add_before(&mut self, node: Id, sibling: Id, child: Id) {
+        self.graph.add_before(node, sibling, child);
+        self.c.request_layout();
+    }
+
     /// Remove a child.
     ///
     /// Can panic if child is not a valid child. The child is not deleted, but
-    /// can be added again later.
+    /// can be added again later. The listeners for the child are cleared.
     pub fn remove_child(&mut self, node: Id, child: Id) {
         self.graph.remove_child(node, child);
         self.widgets[node].on_child_removed(child);

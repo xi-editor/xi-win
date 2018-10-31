@@ -44,6 +44,13 @@ impl Graph {
         self.parent[child] = parent;
     }
 
+    pub fn add_before(&mut self, parent: Id, sibling: Id, child: Id) {
+        let pos = self.children[parent].iter().position(|&x| x == sibling)
+            .expect("tried add_before nonexistent sibling");
+        self.children[parent].insert(pos, child);
+        self.parent[child] = parent;
+    }
+
     /// Remove the child from the parent.
     ///
     /// Can panic if the graph structure is invalid. This function leaves the

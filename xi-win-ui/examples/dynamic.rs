@@ -38,6 +38,7 @@ struct AppState {
 enum Action {
     AddButton,
     DelButton,
+    Sort,
     Select(usize),
 }
 
@@ -53,7 +54,9 @@ fn main() {
     let button1 = Padding::uniform(10.0).ui(add_button, &mut state);
     let del_button = Button::new("Del").ui(&mut state);
     let button2 = Padding::uniform(10.0).ui(del_button, &mut state);
-    let row2 = Row::new().ui(&[button1, button2], &mut state);
+    let sort_button = Button::new("Sort").ui(&mut state);
+    let button3 = Padding::uniform(10.0).ui(sort_button, &mut state);
+    let row2 = Row::new().ui(&[button1, button2, button3], &mut state);
     let col = Column::new().ui(&[label, row1, row2], &mut state);
     let forwarder = EventForwarder::<Action>::new().ui(col, &mut state);
     state.set_root(forwarder);
@@ -71,13 +74,23 @@ fn main() {
                 });
                 let padded = Padding::uniform(10.0).ui(new_button, &mut ctx);
                 app.buttons.insert(n, padded);
-                ctx.append_child(row1, padded);
+                if let Some(sibling) = app.selected {
+                    ctx.add_before(row1, app.buttons[&sibling], padded);
+                } else {
+                    ctx.append_child(row1, padded);
+                }
             }
             Action::DelButton => {
                 if let Some(n) = app.selected.take() {
                     let id = app.buttons.remove(&n).unwrap();
                     ctx.delete_child(row1, id);
                     ctx.poke(label, &mut format!("Selection: {:?}", app.selected));
+                }
+            }
+            Action::Sort => {
+                for &child in app.buttons.values() {
+                    ctx.remove_child(row1, child);
+                    ctx.append_child(row1, child);
                 }
             }
             Action::Select(n) => {
@@ -91,6 +104,9 @@ fn main() {
     });
     state.add_listener(del_button, move |_: &mut bool, mut ctx| {
         ctx.poke_up(&mut Action::DelButton);
+    });
+    state.add_listener(sort_button, move |_: &mut bool, mut ctx| {
+        ctx.poke_up(&mut Action::Sort);
     });
     builder.set_handler(Box::new(UiMain::new(state)));
     builder.set_title("Dynamic example");
