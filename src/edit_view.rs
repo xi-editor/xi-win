@@ -18,7 +18,7 @@ use std::cmp::min;
 use std::ops::Range;
 use std::any::Any;
 use std::sync::{Mutex, Weak};
-use std::cell::RefCell;
+use std::mem;
 
 use serde_json::Value;
 
@@ -73,7 +73,7 @@ pub struct EditView {
     size: (f32, f32),  // in px units
     viewport: Range<usize>,
     core: Weak<Mutex<Core>>,
-    pending: RefCell<Vec<(Method, Params)>>,
+    pending: Vec<(Method, Params)>,
 }
 
 struct Resources {
@@ -147,10 +147,11 @@ impl Widget for EditView {
                 EditViewCommands::ViewId(view_id) => {
                     self.view_id = Some(view_id.to_string());
                     self.viewport = 0..0; // zorch viewport
+                    self.update_viewport();
 
                     // Fire off the pending notifications
-                    let mut pending = self.pending.borrow_mut();
-                    for notification in pending.drain(..) {
+                    let pending = mem::replace(&mut self.pending, Vec::new());
+                    for notification in pending {
                         let (method, params) = notification;
                         self.send_edit_cmd(&method, &params);
                     }
@@ -257,11 +258,6 @@ impl EditView {
         self.resources = None;
     }
 
-    pub fn size(&mut self, x: f32, y: f32) {
-        self.size = (x, y);
-        self.constrain_scroll();
-    }
-
     pub fn clear_line_cache(&mut self) {
         self.line_cache = LineCache::new();
     }
@@ -279,7 +275,7 @@ impl EditView {
         self.constrain_scroll();
     }
 
-    pub fn char(&self, ch: u32, _mods: u32) {
+    pub fn char(&mut self, ch: u32, _mods: u32) {
         if let Some(c) = ::std::char::from_u32(ch) {
             if ch >= 0x20 {
                 // Don't insert control characters
@@ -289,7 +285,7 @@ impl EditView {
         }
     }
 
-    fn send_edit_cmd(&self, method: &str, params: &Value) {
+    fn send_edit_cmd(&mut self, method: &str, params: &Value) {
         // TODO: When let_chains lands, this will be easier.
         let core = self.core.upgrade();
         if core.is_some() && self.view_id.is_some() {
@@ -308,13 +304,12 @@ impl EditView {
             //     "params": params,
             // }));
         } else {
-            let mut pending = self.pending.borrow_mut();
-            pending.push((method.to_owned(), params.clone()));
+            self.pending.push((method.to_owned(), params.clone()));
         }
     }
 
     /// Sends a simple action with no parameters
-    fn send_action(&self, method: &str) {
+    fn send_action(&mut self, method: &str) {
         self.send_edit_cmd(method, &json!([]));
     }
 
