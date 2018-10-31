@@ -146,8 +146,9 @@ impl Widget for EditView {
             match cmd {
                 EditViewCommands::ViewId(view_id) => {
                     self.view_id = Some(view_id.to_string());
+                    self.viewport = 0..0; // zorch viewport
 
-                    // // Fire off the pending notifications
+                    // Fire off the pending notifications
                     let mut pending = self.pending.borrow_mut();
                     for notification in pending.drain(..) {
                         let (method, params) = notification;
@@ -156,9 +157,11 @@ impl Widget for EditView {
                 }
                 EditViewCommands::ApplyUpdate(update) => {
                     self.apply_update(&update);
+                    ctx.invalidate();
                 }
                 EditViewCommands::ScrollTo(line) => {
                     self.scroll_to(*line);
+                    ctx.invalidate();
                 }
                 EditViewCommands::Core(core) => {
                     self.core = core.clone();
@@ -179,33 +182,39 @@ impl Widget for EditView {
                     self.send_action("transpose");
                 }
                 EditViewCommands::AddCursorAbove => {
-                    self.add_cursor_above();
+                    // Note: some subtlety around find, the escape key cancels it, but the menu
+                    // shouldn't.
+                    self.send_action("add_selection_above");
                 }
                 EditViewCommands::AddCursorBelow => {
-                    self.add_cursor_below();
+                    // Note: some subtlety around find, the escape key cancels it, but the menu
+                    // shouldn't.
+                    self.send_action("add_selection_below");
                 }
                 EditViewCommands::SingleSelection => {
-                    self.single_selection();
+                    // Note: some subtlety around find, the escape key cancels it, but the menu
+                    // shouldn't.
+                    self.send_action("cancel_operation");
                 }
                 EditViewCommands::SelectAll => {
-                    self.select_all();
+                    // Note: some subtlety around find, the escape key cancels it, but the menu
+                    // shouldn't.
+                    self.send_action("select_all");
                 }
             }
-            // TODO: Finer grained invalidation
-            ctx.invalidate();
         }
         true
     }
 
-    fn key(&mut self, event: &KeyEvent, _ctx: &mut HandlerCtx) -> bool {
+    fn key(&mut self, event: &KeyEvent, ctx: &mut HandlerCtx) -> bool {
         match event.key {
             KeyVariant::Vkey(vk) => {
-                self.keydown(vk, event.mods);
+                return self.keydown(vk, event.mods, ctx)
             }
             KeyVariant::Char(ch) => {
                 self.char(ch as u32, event.mods);
             }
-        } 
+        }
         true
     }
 }
@@ -309,7 +318,7 @@ impl EditView {
         self.send_edit_cmd(method, &json!([]));
     }
 
-    pub fn keydown(&mut self, vk_code: i32, mods: u32) -> bool {
+    pub fn keydown(&mut self, vk_code: i32, mods: u32, ctx: &mut HandlerCtx) -> bool {
         // Handle special keys here
         match vk_code {
             VK_RETURN => {
@@ -325,6 +334,7 @@ impl EditView {
                     self.scroll_offset -= LINE_SPACE;
                     self.constrain_scroll();
                     self.update_viewport();
+                    ctx.invalidate();
                 } else {
                     let action = if mods == M_CTRL | M_ALT {
                         "add_selection_above"
@@ -340,6 +350,7 @@ impl EditView {
                     self.scroll_offset += LINE_SPACE;
                     self.constrain_scroll();
                     self.update_viewport();
+                    ctx.invalidate();
                 } else {
                     let action = if mods == M_CTRL | M_ALT {
                         "add_selection_below"
@@ -437,31 +448,6 @@ impl EditView {
             }
         }
         true
-    }
-
-    // Commands
-    pub fn add_cursor_above(&mut self) {
-        // Note: some subtlety around find, the escape key cancels it, but the menu
-        // shouldn't.
-        self.send_action("add_selection_above");
-    }
-
-    pub fn add_cursor_below(&mut self) {
-        // Note: some subtlety around find, the escape key cancels it, but the menu
-        // shouldn't.
-        self.send_action("add_selection_below");
-    }
-
-    pub fn single_selection(&mut self) {
-        // Note: some subtlety around find, the escape key cancels it, but the menu
-        // shouldn't.
-        self.send_action("cancel_operation");
-    }
-
-    pub fn select_all(&mut self) {
-        // Note: some subtlety around find, the escape key cancels it, but the menu
-        // shouldn't.
-        self.send_action("select_all");
     }
 
     pub fn mouse_wheel(&mut self, delta: i32, _mods: u32) {
