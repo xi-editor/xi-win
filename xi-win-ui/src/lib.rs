@@ -567,27 +567,29 @@ impl Ui {
     /// Remove a child.
     ///
     /// Can panic if child is not a valid child. The child is not deleted, but
-    /// can be added again later. The listeners for the child are cleared.
+    /// can be added again later. The listeners for the child are not cleared.
     pub fn remove_child(&mut self, node: Id, child: Id) {
         self.graph.remove_child(node, child);
         self.widgets[node].on_child_removed(child);
-        self.c.event_q.push(Event::ClearListeners(node));
         self.c.request_layout();
     }
 
     /// Delete a child.
     ///
     /// Can panic if child is not a valid child. Deletes the subtree rooted at
-    /// the child, and drops those widgets. The id of the child may be reused;
-    /// callers should take care not to use the child id in any way afterwards.
+    /// the child, drops those widgets, and clears all listeners.
+
+    /// The id of the child may be reused; callers should take care not to use the
+    /// child id in any way afterwards.
     pub fn delete_child(&mut self, node: Id, child: Id) {
-        fn delete_rec(widgets: &mut [Box<Widget>], graph: &Graph, node: Id) {
+        fn delete_rec(widgets: &mut [Box<Widget>], q: &mut Vec<Event>, graph: &Graph, node: Id) {
             widgets[node] = Box::new(NullWidget);
+            q.push(Event::ClearListeners(node));
             for &child in &graph.children[node] {
-                delete_rec(widgets, graph, child);
+                delete_rec(widgets, q, graph, child);
             }
         }
-        delete_rec(&mut self.widgets, &self.graph, child);
+        delete_rec(&mut self.widgets, &mut self.c.event_q, &self.graph, child);
         self.remove_child(node, child);
         self.graph.free_subtree(child);
     }
