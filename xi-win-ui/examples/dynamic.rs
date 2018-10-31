@@ -75,7 +75,7 @@ fn main() {
             Action::DelButton => {
                 if let Some(n) = app.selected.take() {
                     let id = app.buttons.remove(&n).unwrap();
-                    ctx.remove_child(row1, id);
+                    ctx.delete_child(row1, id);
                     ctx.poke(label, &mut format!("Selection: {:?}", app.selected));
                 }
             }

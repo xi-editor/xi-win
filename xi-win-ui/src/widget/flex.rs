@@ -239,4 +239,8 @@ impl Widget for Flex {
         };
         LayoutResult::RequestChild(children[self.ix], child_bc)
     }
+
+    fn on_child_removed(&mut self, child: Id) {
+        self.params.remove(&child);
+    }
 }

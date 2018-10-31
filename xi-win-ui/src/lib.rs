@@ -41,6 +41,7 @@ pub mod widget;
 
 use graph::Graph;
 pub use widget::{KeyEvent, KeyVariant, MouseEvent, Widget};
+use widget::NullWidget;
 
 /// The top-level handler for the UI.
 ///
@@ -156,7 +157,8 @@ enum Event {
     /// A request to add a listener.
     AddListener(Id, Box<FnMut(&mut Any, ListenerCtx)>),
 
-    // TODO: likely an event related to widget deletion will go here.
+    /// Sent when a widget is removed so its listeners can be deleted.
+    ClearListeners(Id),
 }
 
 // Contexts for widget methods.
@@ -417,6 +419,9 @@ impl UiState {
                     Event::AddListener(id, listener) => {
                         self.listeners.entry(id).or_default().push(listener);
                     }
+                    Event::ClearListeners(id) => {
+                        self.listeners.get_mut(&id).map(|l| l.clear());
+                    }
                 }
             }
         }
@@ -544,14 +549,34 @@ impl Ui {
     pub fn append_child(&mut self, node: Id, child: Id) {
         // TODO: could do some validation of graph structure (cycles would be bad).
         self.graph.append_child(node, child);
+        self.c.request_layout();
     }
 
     /// Remove a child.
     ///
     /// Can panic if child is not a valid child. The child is not deleted, but
-    /// can ba added again later.
+    /// can be added again later.
     pub fn remove_child(&mut self, node: Id, child: Id) {
         self.graph.remove_child(node, child);
+        self.widgets[node].on_child_removed(child);
+        self.c.event_q.push(Event::ClearListeners(node));
+        self.c.request_layout();
+    }
+
+    /// Delete a child.
+    ///
+    /// Can panic if child is not a valid child. Deletes the subtree rooted at
+    /// the child, and drops those widgets. The id of the child may be reused;
+    /// callers should take care not to use the child id in any way afterwards.
+    pub fn delete_child(&mut self, node: Id, child: Id) {
+        fn delete_rec(widgets: &mut [Box<Widget>], graph: &Graph, node: Id) {
+            widgets[node] = Box::new(NullWidget);
+            for &child in &graph.children[node] {
+                delete_rec(widgets, graph, child);
+            }
+        }
+        delete_rec(&mut self.widgets, &self.graph, child);
+        self.remove_child(node, child);
     }
 
     // The following methods are really UiState methods, but don't need access to listeners
@@ -569,7 +594,7 @@ impl Ui {
             paint_ctx.is_active = active == Some(node);
             paint_ctx.is_hot = hot == Some(node) && (paint_ctx.is_active || active.is_none());
             widgets[node].paint(paint_ctx, &g);
-            for child in graph.children[node].clone() {
+            for &child in &graph.children[node] {
                 paint_rec(widgets, graph, geom, paint_ctx, child, g.pos, active, hot);
             }
         }
@@ -635,19 +660,33 @@ impl LayoutCtx {
     pub fn get_child_size(&self, child: Id) -> (f32, f32) {
         self.geom[child].size
     }
+
+    /// Internal logic for widget invalidation.
+    fn invalidate(&mut self) {
+        match self.anim_state {
+            AnimState::Idle => {
+                self.handle.invalidate();
+                self.anim_state = AnimState::InvalidationRequested;
+            }
+            _ => (),
+        }
+    }
+
+    fn request_layout(&mut self) {
+        self.invalidate();
+    }
 }
 
 impl<'a> HandlerCtx<'a> {
     /// Invalidate this widget. Finer-grained invalidation is not yet implemented,
     /// but when it is, this method will invalidate the widget's bounding box.
     pub fn invalidate(&mut self) {
-        match self.c.anim_state {
-            AnimState::Idle => {
-                self.c.handle.invalidate();
-                self.c.anim_state = AnimState::InvalidationRequested;
-            }
-            _ => (),
-        }
+        self.c.invalidate();
+    }
+
+    /// Request layout; implies invalidation.
+    pub fn request_layout(&mut self) {
+        self.c.request_layout();
     }
 
     /// Send an event, to be handled by listeners.
