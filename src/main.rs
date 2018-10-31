@@ -67,12 +67,12 @@ type ViewId = String;
 struct ViewState {
     id: Id,
     filename: Option<String>,
-    handle: Arc<Mutex<IdleHandle>>,
+    handle: IdleHandle,
 }
 
 #[derive(Clone)]
 struct AppState {
-    focused: ViewId,
+    focused: Option<ViewId>,
     views: HashMap<ViewId, ViewState>,
 }
 
@@ -84,12 +84,13 @@ impl AppState {
         }
     }
 
+    fn get_focused(&self) -> String {
+        self.focused.clone().expect("no focused viewstate")
+    }
+
     fn get_focused_viewstate(&mut self) -> &mut ViewState {
-        if let Some(state) = self.views.get_mut(&self.focused) {
-            return state
-        } else {
-            panic!("Getting viewstate failed.\nFocused: {}\n", &self.focused)
-        }
+        let view_id = self.focused.clone().expect("no focused viewstate");
+        self.views.get_mut(&view_id).expect("Focused viewstate not found in views")
     }
 }
 
@@ -115,7 +116,7 @@ impl App {
         let mut state = self.get_state();
         let focused = state.get_focused_viewstate();
 
-        UiMain::send_ext(&focused.handle.lock().unwrap(), focused.id, cmd);
+        UiMain::send_ext(&focused.handle.clone(), focused.id, cmd);
     }
 }
 
@@ -130,7 +131,7 @@ impl App {
 }
 
 impl App {
-    fn req_new_view(&self, filename: Option<&str>, handle: Arc<Mutex<IdleHandle>>) {
+    fn req_new_view(&self, filename: Option<&str>, handle: IdleHandle) {
         let mut params = json!({});
 
         let filename = if filename.is_some() {
@@ -148,7 +149,7 @@ impl App {
                 let view_id = value.clone().as_str().unwrap().to_string();
                 let mut state = state.lock().unwrap();
                 let handle = handle.clone();
-                state.focused = view_id.clone();
+                state.focused = Some(view_id.clone());
                 state.views.insert(view_id.clone(),
                     ViewState {
                         id: 0,
@@ -156,8 +157,8 @@ impl App {
                         handle: handle.clone(),
                     }
                 );
-                UiMain::send_ext(&handle.lock().unwrap(), edit_view, EditViewCommands::Core(core));
-                UiMain::send_ext(&handle.lock().unwrap(), edit_view, EditViewCommands::ViewId(view_id));
+                UiMain::send_ext(&handle, edit_view, EditViewCommands::Core(core));
+                UiMain::send_ext(&handle, edit_view, EditViewCommands::ViewId(view_id));
             }
         );
     }
@@ -188,7 +189,7 @@ impl AppDispatcher {
         }
     }
 
-    fn set_app(&mut self, app: &App) {
+    fn set_app(&self, app: &App) {
         *self.app.lock().unwrap() = Some(app.clone());
     }
 
@@ -223,34 +224,33 @@ impl AppDispatcher {
                             let mut view_state = state.get_focused_viewstate();
                             if view_state.filename.is_none() {
                                 let filename = ctx.file_dialog(FileDialogType::Save, FileDialogOptions::default());
-                                if filename.is_err() {
+                                let filename = extract_string_from_file_dialog(filename);
+                                if filename.is_none() {
                                     return;
                                 }
-                                let filename = filename.unwrap().into_string();
-                                if filename.is_err() { // invalid unicode data
-                                    return;
-                                }
-                                view_state.filename = Some(filename.unwrap());
+                                view_state.filename = filename;
                             }
                         }
                         let state = app.get_state();
-                        let view_state = &state.views[&state.focused];
+                        let view_state = &state.views[&state.get_focused()];
                         app.send_notification("save", &json!({
                             "view_id": &state.focused,
-                            "file_path": view_state.filename,
+                            "file_path": view_state.filename.clone().unwrap(),
                         }));
                     }
                 }
                 cmd if cmd == MenuEntries::SaveAs as u32 => {
                     if let Some(app) = app.lock().unwrap().as_ref() {
                         let filename = ctx.file_dialog(FileDialogType::Save, FileDialogOptions::default());
-                        let filename = filename.unwrap().into_string().unwrap();
+                        let filename = extract_string_from_file_dialog(filename);
+                        if filename.is_none() {
+                            return;
+                        }
                         app.send_notification("save", &json!({
                             "view_id": app.get_state().focused,
-                            "file_path": filename,
+                            "file_path": filename.clone().unwrap(),
                         }));
-
-                        app.get_state().get_focused_viewstate().filename = Some(filename);
+                        app.get_state().get_focused_viewstate().filename = filename;
                     }
                 }
                 cmd if cmd == MenuEntries::Undo as u32 => {
@@ -305,13 +305,29 @@ impl AppDispatcher {
     }
 }
 
+
+
 impl Handler for AppDispatcher {
     fn notification(&self, method: &str, params: &Value) {
-        println!("core->fe: {} {}", method, params);
+        // NOTE: For debugging, could be replaced by trace logging
+        // println!("core->fe: {} {}", method, params);
         if let Some(ref app) = *self.app.lock().unwrap() {
             app.handle_cmd(method, params);
         }
     }
+}
+
+fn extract_string_from_file_dialog(result: Result<std::ffi::OsString, xi_win_ui::Error>) -> Option<String> {
+    if result.is_err() {
+        println!("File dialog encountered an error: {:?}", result);
+        return None
+    }
+    let result = result.unwrap().into_string();
+    if result.is_err() {
+        println!("Invalid utf returned");
+        return None
+    }
+    Some(result.unwrap())
 }
 
 fn build_app(state: &mut UiState) {
@@ -326,11 +342,11 @@ fn main() {
 
     let (xi_peer, rx) = start_xi_thread();
 
-    let mut handler = AppDispatcher::new();
     let mut runloop = win_main::RunLoop::new();
     let mut builder = WindowBuilder::new();
     let mut state = UiState::new();
 
+    let handler = AppDispatcher::new();
     handler.set_menu_listeners(&mut state);
     build_app(&mut state);
     menus::set_accel(&mut runloop);
@@ -347,7 +363,7 @@ fn main() {
 
     app.send_notification("client_started", &json!({}));
 
-    let handle = Arc::new(Mutex::new(window.get_idle_handle().unwrap()));
+    let handle = window.get_idle_handle().unwrap();
     app.req_new_view(None, handle);
 
     window.show();

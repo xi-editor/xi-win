@@ -133,10 +133,6 @@ impl Widget for EditView {
         false
     }
 
-    fn mouse_moved(&mut self, _x: f32, _y: f32, _ctx: &mut HandlerCtx) {}
-
-    fn on_hot_changed(&mut self, _hot: bool, _ctx: &mut HandlerCtx) {}
-
     fn poke(&mut self, payload: &mut Any, ctx: &mut HandlerCtx) -> bool { 
         if let Some(cmd) = payload.downcast_ref::<EditViewCommands>() {
             match cmd {
@@ -180,6 +176,7 @@ impl Widget for EditView {
                     self.select_all();
                 }
             }
+            // TODO: Finer grained invalidation
             ctx.invalidate();
         }
         true
@@ -196,8 +193,6 @@ impl Widget for EditView {
         } 
         true
     }
-
-    fn anim_frame(&mut self, _interval: u64, _ctx: &mut HandlerCtx) {}
 }
 
 impl EditView {
@@ -281,12 +276,13 @@ impl EditView {
     fn send_notification(&self, method: &str, params: &Value) {
         if let Some(ref core) = self.core.upgrade() {
             core.lock().unwrap().send_notification(method, params);
-            println!("fe->core: {}", json!({
-                "method": method,
-                "params": params,
-            }));
+            // NOTE: For debugging, could be replaced by trace logging
+            // println!("fe->core: {}", json!({
+            //     "method": method,
+            //     "params": params,
+            // }));
         } else {
-            // queue pending
+            // TODO: queue pending
         }
     }
 
