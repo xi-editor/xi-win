@@ -14,11 +14,11 @@ xi-rpc = { git = "https://github.com/xi-editor/xi-editor" }
 serde = "1.0"
 serde_json = "1.0"
 
-[dependencies.xi-win-shell]
-path = "xi-win-shell"
+[dependencies.druid-win-shell]
+git = "https://github.com/xi-editor/druid"
 
-[dependencies.xi-win-ui]
-path = "xi-win-ui"
+[dependencies.druid]
+git = "https://github.com/xi-editor/druid"
 
 [dependencies.winapi]
 version = "0.3.6"

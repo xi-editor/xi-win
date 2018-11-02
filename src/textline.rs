@@ -19,7 +19,7 @@ use direct2d::brush::SolidColorBrush;
 use directwrite;
 use directwrite::{TextFormat, TextLayout};
 
-use xi_win_shell::util::default_text_options;
+use druid_win_shell::util::default_text_options;
 
 use linecache::{Line, StyleSpan};
 

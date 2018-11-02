@@ -32,8 +32,8 @@ extern crate serde_json;
 extern crate xi_core_lib;
 extern crate xi_rpc;
 #[macro_use]
-extern crate xi_win_shell;
-extern crate xi_win_ui;
+extern crate druid_win_shell;
+extern crate druid;
 
 mod edit_view;
 mod linecache;
@@ -52,12 +52,12 @@ use menus::MenuEntries;
 use rpc::{Core, Handler};
 use xi_thread::start_xi_thread;
 
-use xi_win_shell::win_main::{self};
-use xi_win_shell::window::{Cursor, IdleHandle, WindowBuilder};
+use druid_win_shell::win_main::{self};
+use druid_win_shell::window::{Cursor, IdleHandle, WindowBuilder};
 
-use xi_win_ui::{UiMain, UiState};
-use xi_win_ui::Id;
-use xi_win_ui::{FileDialogOptions, FileDialogType};
+use druid::{UiMain, UiState};
+use druid::Id;
+use druid::{FileDialogOptions, FileDialogType};
 
 use edit_view::EditViewCommands;
 
@@ -317,7 +317,7 @@ impl Handler for AppDispatcher {
     }
 }
 
-fn extract_string_from_file_dialog(result: Result<std::ffi::OsString, xi_win_ui::Error>) -> Option<String> {
+fn extract_string_from_file_dialog(result: Result<std::ffi::OsString, druid::Error>) -> Option<String> {
     if result.is_err() {
         println!("File dialog encountered an error: {:?}", result);
         return None
@@ -338,7 +338,7 @@ fn build_app(state: &mut UiState) {
 }
 
 fn main() {
-    xi_win_shell::init();
+    druid_win_shell::init();
 
     let (xi_peer, rx) = start_xi_thread();
 
