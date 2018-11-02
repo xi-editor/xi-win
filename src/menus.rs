@@ -17,8 +17,8 @@
 use winapi::shared::minwindef::WORD;
 use winapi::um::winuser::*;
 
-use xi_win_shell::menu::Menu;
-use xi_win_shell::win_main::RunLoop;
+use druid_win_shell::menu::Menu;
+use druid_win_shell::win_main::RunLoop;
 
 #[repr(u32)]
 pub enum MenuEntries {

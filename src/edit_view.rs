@@ -30,14 +30,14 @@ use direct2d::RenderTarget;
 use directwrite;
 use directwrite::TextFormat;
 
-use xi_win_shell::window::{M_ALT, M_CTRL, M_SHIFT, MouseButton};
+use druid_win_shell::window::{M_ALT, M_CTRL, M_SHIFT, MouseButton};
 
-use xi_win_ui::Ui;
-use xi_win_ui::widget::Widget;
+use druid::Ui;
+use druid::widget::Widget;
 
-use xi_win_ui::{BoxConstraints, Geometry, LayoutResult};
-use xi_win_ui::{HandlerCtx, Id, LayoutCtx, MouseEvent, PaintCtx, KeyEvent};
-use xi_win_ui::{KeyVariant};
+use druid::{BoxConstraints, Geometry, LayoutResult};
+use druid::{HandlerCtx, Id, LayoutCtx, MouseEvent, PaintCtx, KeyEvent};
+use druid::{KeyVariant};
 
 use rpc::Core;
 use linecache::LineCache;
