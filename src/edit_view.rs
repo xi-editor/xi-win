@@ -454,8 +454,14 @@ impl EditView {
     }
 
     fn constrain_scroll(&mut self) {
-        let max_scroll = TOP_PAD + LINE_SPACE *
-            (self.line_cache.height().saturating_sub(1)) as f32;
+        let mut max_scroll = TOP_PAD + (LINE_SPACE *
+            (self.line_cache.height().saturating_sub(1)) as f32) - self.size.1 + LINE_SPACE;
+
+        // Not allowing to scroll if the text is smaller than the window size
+        if (LINE_SPACE * self.line_cache.height().saturating_sub(1) as f32) < self.size.1 {
+            max_scroll = 0 as f32;
+        }
+
         if self.scroll_offset < 0.0 {
             self.scroll_offset = 0.0;
         } else if self.scroll_offset > max_scroll {
