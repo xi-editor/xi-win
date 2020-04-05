@@ -31,7 +31,7 @@ pub struct Core {
 struct CoreState {
     xi_peer: XiPeer,
     id: u64,
-    pending: BTreeMap<u64, Box<Callback>>,
+    pending: BTreeMap<u64, Box<dyn Callback>>,
 }
 
 trait Callback: Send {

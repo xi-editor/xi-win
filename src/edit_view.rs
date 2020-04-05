@@ -141,7 +141,7 @@ impl Widget for EditView {
         false
     }
 
-    fn poke(&mut self, payload: &mut Any, ctx: &mut HandlerCtx) -> bool { 
+    fn poke(&mut self, payload: &mut dyn Any, ctx: &mut HandlerCtx) -> bool { 
         if let Some(cmd) = payload.downcast_ref::<EditViewCommands>() {
             match cmd {
                 EditViewCommands::ViewId(view_id) => {
