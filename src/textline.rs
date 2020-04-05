@@ -39,7 +39,7 @@ impl TextLine {
         -> TextLine
     {
         let text = line.text();
-        let trimmed_text = text.trim_right_matches(|c| c == '\r' || c == '\n');
+        let trimmed_text = text.trim_end_matches(|c| c == '\r' || c == '\n');
         let layout = TextLayout::create(factory)
             .with_text(trimmed_text)
             .with_font(format)
